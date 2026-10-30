@@ -1,0 +1,52 @@
+name: Release (manual)
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag (for example v0.2.0)
+        required: true
+        type: string
+      prerelease:
+        description: Mark release as prerelease
+        required: true
+        type: boolean
+        default: true
+jobs:
+  windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Check release signing configuration
+        shell: pwsh
+        env:
+          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if (-not $env:SIGNING_KEY -or -not $env:SIGNING_PASSWORD) { throw 'Tauri updater signing secrets are required.' }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ inputs.tag }}
+          releaseName: CivilDesk ${{ inputs.tag }}
+          releaseBody: See the release notes in the repository changelog.
+          releaseDraft: true
+          prerelease: ${{ inputs.prerelease }}
+          args: --bundles nsis --config src-tauri/tauri.release.conf.json
