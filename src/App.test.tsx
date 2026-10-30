@@ -19,4 +19,12 @@ describe('first-run workspace', () => {
     render(<App/>);
     expect(await screen.findByText('Pip is taking a break')).toBeInTheDocument();
   });
+
+  it('shows a recoverable error when stored state cannot be read', async () => {
+    localStorage.setItem('civildesk.preview.v1', '{invalid');
+    render(<App/>);
+    expect(await screen.findByText('CivilDesk could not open')).toBeInTheDocument();
+    expect(screen.getByText('Error: Preview preferences could not be read.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
 });

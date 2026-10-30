@@ -8,7 +8,7 @@ Requires Node 24, npm, Rust stable with MSVC target, Windows C++ build tools, an
 
 Checks: `npm run typecheck`, `npm run lint`, `npm test`, `npm run build`, `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check`, `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`, `cargo test --manifest-path src-tauri/Cargo.toml`, and `npm run tauri build -- --bundles nsis`.
 
-See [architecture](docs/ARCHITECTURE.md) for schema, challenge, Notion, Pip, and release plans.
+See [architecture](docs/ARCHITECTURE.md) for schema, challenge, Notion, Pip, and release plans. Use the [native Windows acceptance procedure](docs/NATIVE_VERIFICATION.md) after CI produces an installer.
 
 ## Local validation status
 

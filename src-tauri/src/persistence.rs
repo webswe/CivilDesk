@@ -61,11 +61,21 @@ pub struct AppSnapshot {
 pub struct Database(Mutex<Connection>);
 
 impl Database {
-    pub fn open(path: &Path) -> rusqlite::Result<Self> {
-        let connection = Connection::open(path)?;
-        connection.pragma_update(None, "foreign_keys", "ON")?;
-        connection.busy_timeout(std::time::Duration::from_secs(5))?;
-        migrate(&connection)?;
+    pub fn open(path: &Path) -> Result<Self, String> {
+        let connection = Connection::open(path).map_err(|e| e.to_string())?;
+        connection
+            .busy_timeout(std::time::Duration::from_secs(5))
+            .map_err(|e| e.to_string())?;
+        let integrity: String = connection
+            .query_row("PRAGMA quick_check", [], |row| row.get(0))
+            .map_err(|e| format!("SQLite integrity check could not run: {e}"))?;
+        if integrity != "ok" {
+            return Err(format!("SQLite integrity check failed: {integrity}"));
+        }
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .map_err(|e| e.to_string())?;
+        migrate(&connection).map_err(|e| format!("Database migration failed: {e}"))?;
         Ok(Self(Mutex::new(connection)))
     }
 
@@ -137,10 +147,14 @@ impl Database {
     }
 }
 
-fn migrate(conn: &Connection) -> rusqlite::Result<()> {
-    let version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+fn migrate(conn: &Connection) -> Result<(), String> {
+    let version: u32 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(|e| format!("Could not read database schema version: {e}"))?;
     if version > 1 {
-        return Err(rusqlite::Error::InvalidQuery);
+        return Err(format!(
+            "Database schema version {version} is newer than supported version 1"
+        ));
     }
     if version == 0 {
         conn.execute_batch("BEGIN IMMEDIATE;
@@ -148,7 +162,8 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             CREATE TABLE reward_events (id TEXT PRIMARY KEY NOT NULL, kind TEXT NOT NULL, source_id TEXT NOT NULL, occurred_at TEXT NOT NULL, UNIQUE(kind, source_id));
             CREATE TABLE earned_achievements (definition_id TEXT NOT NULL, rule_version INTEGER NOT NULL, event_id TEXT NOT NULL REFERENCES reward_events(id), earned_at TEXT NOT NULL, PRIMARY KEY(definition_id, rule_version));
             CREATE TABLE cosmetic_unlocks (cosmetic_id TEXT PRIMARY KEY NOT NULL, source_event_id TEXT NOT NULL REFERENCES reward_events(id), unlocked_at TEXT NOT NULL);
-            PRAGMA user_version = 1; COMMIT;")?;
+            PRAGMA user_version = 1; COMMIT;")
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -156,6 +171,18 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_test_path() -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "civildesk-test-{}-{nanos}.sqlite3",
+            std::process::id()
+        ))
+    }
     #[test]
     fn migration_and_round_trip() {
         let db = Database(Mutex::new(Connection::open_in_memory().unwrap()));
@@ -176,5 +203,63 @@ mod tests {
         let mut snapshot = AppSnapshot::default();
         snapshot.companion.state = "unknown".into();
         assert!(db.save(&snapshot).is_err());
+    }
+
+    #[test]
+    fn reopening_preserves_data_and_migration_version() {
+        let path = unique_test_path();
+        {
+            let db = Database::open(&path).unwrap();
+            let mut snapshot = AppSnapshot::default();
+            snapshot.preferences.display_name = "Alex".into();
+            snapshot.preferences.onboarding_complete = true;
+            snapshot.preferences.pip_visible = false;
+            db.save(&snapshot).unwrap();
+        }
+        {
+            let db = Database::open(&path).unwrap();
+            let snapshot = db.load().unwrap();
+            assert_eq!(snapshot.preferences.display_name, "Alex");
+            assert!(snapshot.preferences.onboarding_complete);
+            assert!(!snapshot.preferences.pip_visible);
+            let version: u32 =
+                db.0.lock()
+                    .unwrap()
+                    .pragma_query_value(None, "user_version", |row| row.get(0))
+                    .unwrap();
+            assert_eq!(version, 1);
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn corrupt_database_is_rejected_without_replacement() {
+        let path = unique_test_path();
+        let bytes = b"not a SQLite database";
+        std::fs::write(&path, bytes).unwrap();
+        assert!(Database::open(&path).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn newer_schema_is_rejected_without_changing_data() {
+        let path = unique_test_path();
+        {
+            let connection = Connection::open(&path).unwrap();
+            connection.execute_batch("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO app_state VALUES ('marker', 'keep'); PRAGMA user_version = 2;").unwrap();
+        }
+        assert!(Database::open(&path).is_err());
+        let connection = Connection::open(&path).unwrap();
+        let marker: String = connection
+            .query_row(
+                "SELECT value FROM app_state WHERE key='marker'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(marker, "keep");
+        drop(connection);
+        std::fs::remove_file(path).unwrap();
     }
 }
