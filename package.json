@@ -9,6 +9,7 @@
     "typecheck": "tsc -b --pretty false",
     "lint": "eslint .",
     "test": "vitest run",
+    "check:e2e-isolation": "node scripts/check-e2e-config.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

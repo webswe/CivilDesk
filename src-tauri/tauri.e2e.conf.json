@@ -1,0 +1,24 @@
+{
+  "productName": "CivilDesk E2E",
+  "identifier": "com.webswe.civildesk.e2e",
+  "mainBinaryName": "civildesk-e2e",
+  "app": {
+    "appDirectoriesOverride": {
+      "data": "$DATA/com.webswe.civildesk.e2e",
+      "localData": "$LOCALDATA/com.webswe.civildesk.e2e"
+    },
+    "windows": [
+      {
+        "title": "CivilDesk E2E",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 650,
+        "minHeight": 600,
+        "backgroundColor": "#211B20"
+      }
+    ]
+  },
+  "bundle": {
+    "createUpdaterArtifacts": false
+  }
+}
