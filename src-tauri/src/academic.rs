@@ -323,7 +323,8 @@ impl Database {
                 input.description,
                 input.meeting_schedule.trim(),
                 input.location.trim(),
-                input.color
+                input.color,
+                now
             ],
         )
         .map_err(sql)?;
