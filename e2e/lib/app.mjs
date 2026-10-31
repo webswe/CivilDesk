@@ -55,14 +55,29 @@ export async function addTask({ title, area, due }) {
   await taskRow(title).waitForDisplayed({ timeoutMsg: 'Task "' + title + '" did not appear after saving.' });
 }
 export const taskRow = title => $(`//article[contains(@class,"task-row")][.//strong[normalize-space(.)=${q(title)}]]`);
-export async function taskTitles() { return Promise.all((await $$('//article[contains(@class,"task-row")]//strong')).map(e => e.getText())); }
+export async function taskTitles() {
+  // WebdriverIO's ElementArray is array-like but not iterable, so index it explicitly.
+  const rows = await $$('//article[contains(@class,"task-row")]//strong');
+  const titles = [];
+  for (let i = 0; i < rows.length; i++) titles.push(await rows[i].getText());
+  return titles;
+}
 
 /** Call a Tauri command through the app's own IPC bridge, to create predictable fixture data. */
 export async function invoke(command, args) {
   const result = await browser.executeAsync((cmd, a, done) => {
-    window.__TAURI_INTERNALS__.invoke(cmd, a).then(() => done({ ok: true }), e => done({ ok: false, error: String(e) }));
+    window.__TAURI_INTERNALS__.invoke(cmd, a).then(value => done({ ok: true, value }), e => done({ ok: false, error: String(e) }));
   }, command, args);
   if (!result.ok) throw new Error(command + ' failed: ' + result.error);
+  return result.value;
+}
+/**
+ * Read-your-writes barrier before restarting the app. The Rust side serialises database access, so once a
+ * read through the app's own IPC shows the change, it is committed. If it never appears, the backend did not
+ * persist it, which is reported as a failure rather than hidden by a longer sleep.
+ */
+export async function waitForPersisted(command, predicate, description) {
+  await browser.waitUntil(async () => predicate(await invoke(command, {})), { timeout: 15000, interval: 200, timeoutMsg: 'Backend never persisted: ' + description });
 }
 export const taskFixture = (over = {}) => ({ id: crypto.randomUUID(), title: 'Fixture task', description: '', category: 'Personal', priority: 'normal', dueDate: null, dueTime: null, subtasks: [], reminderOffsetMinutes: null, ...over });
 export const eventFixture = (over = {}) => ({ id: crypto.randomUUID(), title: 'Fixture event', description: '', startDate: localDate(), startTime: null, endDate: localDate(), endTime: null, allDay: true, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, startAtMs: null, endAtMs: null, reminderOffsetMinutes: null, ...over });

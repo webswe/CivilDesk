@@ -25,15 +25,18 @@ for (const r of records) {
   }
 }
 
-const junit = path.join(results, 'junit-results.xml');
-if (!fs.existsSync(junit)) note('JUnit report is missing');
-else {
-  const xml = fs.readFileSync(junit, 'utf8');
-  const total = Number(/<testsuites[^>]*\btests="(\d+)"/.exec(xml)?.[1] ?? 0);
-  const failed = Number(/<testsuites[^>]*\bfailures="(\d+)"/.exec(xml)?.[1] ?? 0) + Number(/<testsuites[^>]*\berrors="(\d+)"/.exec(xml)?.[1] ?? 0);
-  console.log(`JUnit: ${total} tests, ${failed} failed`);
-  if (total === 0) note('JUnit report contains no tests');
-  if (failed > 0) note(`${failed} acceptance test(s) failed`);
+const junitFiles = fs.readdirSync(results).filter(f => /^junit-results.*\.xml$/.test(f));
+if (!junitFiles.length) note('JUnit report is missing');
+let total = 0, failed = 0;
+for (const f of junitFiles) {
+  const xml = fs.readFileSync(path.join(results, f), 'utf8');
+  total += Number(/<testsuites[^>]*tests="(\d+)"/.exec(xml)?.[1] ?? 0);
+  failed += Number(/<testsuites[^>]*failures="(\d+)"/.exec(xml)?.[1] ?? 0) + Number(/<testsuites[^>]*errors="(\d+)"/.exec(xml)?.[1] ?? 0);
 }
+console.log(`JUnit: ${junitFiles.length} report(s), ${total} tests, ${failed} failed`);
+if (junitFiles.length && total === 0) note('JUnit reports contain no tests');
+if (failed > 0) note(`${failed} acceptance test(s) failed`);
+// Each spec file must have produced a SQLite record and a JUnit report.
+if (junitFiles.length !== records.length) note(`${junitFiles.length} JUnit report(s) but ${records.length} session record(s)`);
 if (failures.length) process.exit(1);
 console.log('Acceptance results verified.');

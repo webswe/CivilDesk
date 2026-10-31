@@ -60,7 +60,8 @@ describe('engineering (real application)', () => {
 
   it('opens the project journal', async () => {
     await $('//button[contains(@class,"project-title")]').click();
-    await button('Journal').click();
+    // Scope to the project tabs: the sidebar also has a button named "Journal".
+    await $('//div[contains(@class,"project-tabs")]//button[normalize-space(.)="Journal"]').click();
     await expect($('//h2[normalize-space(.)="Engineering journal"]')).toBeDisplayed();
     await openEngineering('Journal');
     await expect(navButton('Journal')).toHaveAttribute('aria-current', 'page');

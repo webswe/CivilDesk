@@ -51,11 +51,11 @@ export const config = {
   connectionRetryCount: 2,
   framework: 'mocha',
   mochaOpts: { ui: 'bdd', timeout: 90000 },
-  reporters: ['spec', ['junit', { outputDir: results, outputFileFormat: () => 'junit-results.xml' }]],
+  reporters: ['spec', ['junit', { outputDir: results, outputFileFormat: options => `junit-results-${options.cid}.xml` }]],
 
   onPrepare: fatal(async () => {
     // Clear only the previous run's own outputs (never the folder the logger already has open).
-    for (const stale of ['db-checks.jsonl', 'junit-results.xml', 'tauri-driver.log', 'desktop-on-failure.png']) fs.rmSync(path.join(results, stale), { force: true });
+    for (const stale of fs.readdirSync(results)) if (/^(db-checks\.jsonl|junit-results.*\.xml|tauri-driver\.log|desktop-on-failure\.png)$/.test(stale)) fs.rmSync(path.join(results, stale), { force: true });
     fs.rmSync(path.join(results, 'screenshots'), { recursive: true, force: true });
     fs.mkdirSync(path.join(results, 'screenshots'), { recursive: true });
     if (!fs.existsSync(binary)) throw new Error('E2E binary not found: ' + binary + '. Build it with: npm run tauri build -- --debug --no-bundle --config src-tauri/tauri.e2e.conf.json');

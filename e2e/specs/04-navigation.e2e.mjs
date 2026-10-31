@@ -1,6 +1,6 @@
 // Sidebar grouping, Engineering expansion, breadcrumbs, keyboard use, icon rail, persisted collapse.
 import { $, browser, expect } from '@wdio/globals';
-import { NAV, button, go, navButton, onboard, restartApp, waitReady } from '../lib/app.mjs';
+import { NAV, button, go, navButton, onboard, restartApp, waitForPersisted, waitReady } from '../lib/app.mjs';
 
 const crumbs = () => $('//nav[@aria-label="Breadcrumb"]');
 
@@ -56,6 +56,7 @@ describe('navigation (real application)', () => {
   it('remembers a collapsed sidebar after the application restarts', async () => {
     await button('Collapse sidebar').click();
     await expect($('//aside[contains(@class,"collapsed")]')).toBeExisting();
+    await waitForPersisted('load_snapshot', snapshot => snapshot.preferences.sidebarCollapsed === true, 'sidebarCollapsed=true');
     await restartApp();
     await expect($('//aside[contains(@class,"collapsed")]')).toBeExisting();
     await button('Expand sidebar').click();

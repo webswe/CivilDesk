@@ -1,6 +1,6 @@
 // Pip: dock, companion page, wardrobe, achievements, persistence, and task XP.
 import { $, expect } from '@wdio/globals';
-import { addTask, button, go, onboard, restartApp } from '../lib/app.mjs';
+import { addTask, button, go, onboard, restartApp, waitForPersisted } from '../lib/app.mjs';
 
 const dock = () => $('//div[contains(@class,"pip-dock")]');
 const level = () => $('//*[contains(@class,"pip-level")]');
@@ -29,6 +29,7 @@ describe('Pip (real application)', () => {
     await go('Personal');
     await addTask({ title: 'Pip XP task' });
     await button('Complete Pip XP task').click();
+    await waitForPersisted('load_workspace', data => data.progression.xp === 25, 'task XP = 25');
     await restartApp();
     await go('Pip');
     await expect(level()).toHaveText('Level 1 · 25 XP');
