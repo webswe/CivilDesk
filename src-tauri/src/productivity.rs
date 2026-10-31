@@ -153,6 +153,20 @@ fn task_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         project_id: r.get(13)?,
     })
 }
+/// Inserts or updates a task. The category of a task that has academic coursework metadata is
+/// never rewritten here: its School placement is owned by the coursework link, so editing it from a
+/// generic task form cannot silently move it out of its course.
+pub(crate) fn upsert_task(c: &Connection, t: &TaskInput) -> Result<(), String> {
+    validate_task(t)?;
+    let now = now_ms();
+    let subtasks = serde_json::to_string(&t.subtasks).map_err(|e| e.to_string())?;
+    c.execute("INSERT INTO tasks(id,title,description,category,priority,due_date,due_time,subtasks_json,reminder_offset_minutes,created_at_ms,updated_at_ms) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10)
+        ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,
+        category=CASE WHEN EXISTS(SELECT 1 FROM task_academic WHERE task_id=tasks.id) THEN tasks.category ELSE excluded.category END,
+        priority=excluded.priority,due_date=excluded.due_date,due_time=excluded.due_time,subtasks_json=excluded.subtasks_json,reminder_offset_minutes=excluded.reminder_offset_minutes,updated_at_ms=excluded.updated_at_ms",
+        params![t.id,t.title.trim(),t.description,t.category.trim(),t.priority,t.due_date,t.due_time,subtasks,t.reminder_offset_minutes,now]).map_err(|e|e.to_string())?;
+    Ok(())
+}
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FocusSession {
@@ -278,14 +292,8 @@ impl Database {
         })
     }
     pub fn save_task(&self, t: TaskInput) -> Result<(), String> {
-        validate_task(&t)?;
-        let now = now_ms();
-        let subtasks = serde_json::to_string(&t.subtasks).map_err(|e| e.to_string())?;
         let c = self.0.lock().map_err(|_| "database lock failed")?;
-        c.execute("INSERT INTO tasks(id,title,description,category,priority,due_date,due_time,subtasks_json,reminder_offset_minutes,created_at_ms,updated_at_ms) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10)
-            ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,category=excluded.category,priority=excluded.priority,due_date=excluded.due_date,due_time=excluded.due_time,subtasks_json=excluded.subtasks_json,reminder_offset_minutes=excluded.reminder_offset_minutes,updated_at_ms=excluded.updated_at_ms",
-            params![t.id,t.title.trim(),t.description,t.category.trim(),t.priority,t.due_date,t.due_time,subtasks,t.reminder_offset_minutes,now]).map_err(|e|e.to_string())?;
-        Ok(())
+        upsert_task(&c, &t)
     }
     pub fn delete_task(&self, id: &str) -> Result<(), String> {
         let c = self.0.lock().map_err(|_| "database lock failed")?;

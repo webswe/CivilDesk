@@ -1,9 +1,11 @@
+mod academic;
 mod calendar;
 mod challenges;
 mod persistence;
 mod productivity;
 mod projects;
 
+use academic::{AcademicData, CourseInput, CourseworkInput, SemesterInput};
 use calendar::CalendarInput;
 use challenges::ChallengeSettings;
 use persistence::{AppSnapshot, Database};
@@ -274,6 +276,56 @@ fn create_challenge_project(
     state.database()?.create_challenge_project(&challenge_id)
 }
 
+#[tauri::command]
+fn load_academic(state: tauri::State<'_, RuntimeState>) -> Result<AcademicData, String> {
+    state.database()?.academic()
+}
+#[tauri::command]
+fn save_semester(
+    state: tauri::State<'_, RuntimeState>,
+    semester: SemesterInput,
+) -> Result<(), String> {
+    state.database()?.save_semester(semester)
+}
+#[tauri::command]
+fn set_active_semester(
+    state: tauri::State<'_, RuntimeState>,
+    id: Option<String>,
+) -> Result<(), String> {
+    state.database()?.set_active_semester(id.as_deref())
+}
+#[tauri::command]
+fn set_semester_archived(
+    state: tauri::State<'_, RuntimeState>,
+    id: String,
+    archived: bool,
+) -> Result<(), String> {
+    state.database()?.set_semester_archived(&id, archived)
+}
+#[tauri::command]
+fn save_course(state: tauri::State<'_, RuntimeState>, course: CourseInput) -> Result<(), String> {
+    state.database()?.save_course(course)
+}
+#[tauri::command]
+fn set_course_archived(
+    state: tauri::State<'_, RuntimeState>,
+    id: String,
+    archived: bool,
+) -> Result<(), String> {
+    state.database()?.set_course_archived(&id, archived)
+}
+#[tauri::command]
+fn save_coursework(
+    state: tauri::State<'_, RuntimeState>,
+    coursework: CourseworkInput,
+) -> Result<(), String> {
+    state.database()?.save_coursework(coursework)
+}
+#[tauri::command]
+fn unlink_coursework(state: tauri::State<'_, RuntimeState>, task_id: String) -> Result<(), String> {
+    state.database()?.unlink_coursework(&task_id)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -333,7 +385,15 @@ pub fn run() {
             add_challenge_evidence,
             remove_challenge_evidence,
             link_challenge_project,
-            create_challenge_project
+            create_challenge_project,
+            load_academic,
+            save_semester,
+            set_active_semester,
+            set_semester_archived,
+            save_course,
+            set_course_archived,
+            save_coursework,
+            unlink_coursework
         ])
         .run(tauri::generate_context!())
         .expect("CivilDesk could not start");

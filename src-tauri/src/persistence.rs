@@ -155,9 +155,9 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), String> {
     let version: u32 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|e| format!("Could not read database schema version: {e}"))?;
-    if version > 5 {
+    if version > 6 {
         return Err(format!(
-            "Database schema version {version} is newer than supported version 5"
+            "Database schema version {version} is newer than supported version 6"
         ));
     }
     if version == 0 {
@@ -274,6 +274,36 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), String> {
             PRAGMA user_version = 5; COMMIT;")
             .map_err(|e| e.to_string())?;
     }
+    if version < 6 {
+        conn.execute_batch("BEGIN IMMEDIATE;
+            CREATE TABLE semesters (
+                id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, institution TEXT NOT NULL DEFAULT '',
+                start_date TEXT NOT NULL, end_date TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 0 CHECK(is_active IN (0,1)),
+                archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1)),
+                created_at_ms INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL,
+                CHECK(end_date >= start_date), CHECK(NOT (is_active = 1 AND archived = 1))
+            );
+            CREATE UNIQUE INDEX one_active_semester ON semesters((1)) WHERE is_active = 1;
+            CREATE TABLE courses (
+                id TEXT PRIMARY KEY NOT NULL, semester_id TEXT NOT NULL REFERENCES semesters(id) ON DELETE RESTRICT,
+                code TEXT NOT NULL, name TEXT NOT NULL, instructor TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL DEFAULT '', meeting_schedule TEXT NOT NULL DEFAULT '',
+                location TEXT NOT NULL DEFAULT '', color TEXT NOT NULL DEFAULT '',
+                archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1)),
+                created_at_ms INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL
+            );
+            CREATE UNIQUE INDEX courses_semester_code ON courses(semester_id, code COLLATE NOCASE);
+            CREATE TABLE task_academic (
+                task_id TEXT PRIMARY KEY NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE RESTRICT,
+                work_type TEXT NOT NULL CHECK(work_type IN ('assignment','quiz','exam','general')),
+                reference_notes TEXT NOT NULL DEFAULT '', created_at_ms INTEGER NOT NULL
+            );
+            CREATE INDEX task_academic_course ON task_academic(course_id);
+            PRAGMA user_version = 6; COMMIT;")
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -336,7 +366,7 @@ mod tests {
                     .unwrap()
                     .pragma_query_value(None, "user_version", |row| row.get(0))
                     .unwrap();
-            assert_eq!(version, 5);
+            assert_eq!(version, 6);
         }
         std::fs::remove_file(path).unwrap();
     }
@@ -356,7 +386,7 @@ mod tests {
         let path = unique_test_path();
         {
             let connection = Connection::open(&path).unwrap();
-            connection.execute_batch("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO app_state VALUES ('marker', 'keep'); PRAGMA user_version = 6;").unwrap();
+            connection.execute_batch("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO app_state VALUES ('marker', 'keep'); PRAGMA user_version = 7;").unwrap();
         }
         assert!(Database::open(&path).is_err());
         let connection = Connection::open(&path).unwrap();
@@ -392,7 +422,7 @@ mod tests {
                 .unwrap()
                 .pragma_query_value(None, "user_version", |r| r.get(0))
                 .unwrap();
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
         drop(db);
         std::fs::remove_file(path).unwrap();
     }
@@ -421,7 +451,7 @@ mod tests {
         let version: i64 = c
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 5);
+        assert_eq!(version, 6);
         drop(c);
         drop(db);
         std::fs::remove_file(path).unwrap();
