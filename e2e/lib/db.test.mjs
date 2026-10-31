@@ -36,7 +36,7 @@ describe('database inspection (backup-API snapshot)', () => {
   it('reports version, integrity, tables and committed rows', async () => {
     create(5, "INSERT INTO tasks (title) VALUES ('a'), ('b'), ('c');");
     const before = snapshotDirs();
-    expect(await inspectDatabase(database, env)).toEqual({ exists: true, userVersion: 5, integrity: 'ok', tables: ['tasks'], rows: { tasks: 3 } });
+    expect(await inspectDatabase(database, env)).toEqual({ exists: true, userVersion: 5, integrity: 'ok', foreignKeyViolations: 0, tables: ['tasks'], rows: { tasks: 3 } });
     expect(snapshotDirs()).toEqual(before); // its temporary snapshot folder is removed
   });
   it('detects the actual schema version rather than assuming one', async () => {

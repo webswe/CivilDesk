@@ -23,7 +23,7 @@ export function expectedSchemaVersion() {
 }
 
 /**
- * @returns {Promise<{exists:false}|{exists:true,userVersion:number,integrity:string,tables:string[],rows:Record<string,number>}>}
+ * @returns {Promise<{exists:false}|{exists:true,userVersion:number,integrity:string,foreignKeyViolations:number,tables:string[],rows:Record<string,number>}>}
  * Throws with the real SQLite error if the database cannot be opened, snapshotted or inspected.
  */
 export async function inspectDatabase(file, env = process.env) {
@@ -43,7 +43,9 @@ export async function inspectDatabase(file, env = process.env) {
     const one = sql => Object.values(snapshot.prepare(sql).get() ?? {})[0];
     const tables = snapshot.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map(r => String(r.name));
     const rows = Object.fromEntries(tables.map(name => [name, Number(one(`SELECT COUNT(*) FROM "${name.replaceAll('"', '""')}"`))]));
-    return { exists: true, userVersion: Number(one('PRAGMA user_version')), integrity: String(one('PRAGMA quick_check')), tables, rows };
+    // Foreign keys are enforced by the application but SQLite only reports existing violations on request.
+    const foreignKeyViolations = snapshot.prepare('PRAGMA foreign_key_check').all().length;
+    return { exists: true, userVersion: Number(one('PRAGMA user_version')), integrity: String(one('PRAGMA quick_check')), foreignKeyViolations, tables, rows };
   } finally {
     try { source?.close(); } catch { /* already closed */ }
     try { snapshot?.close(); } catch { /* already closed */ }

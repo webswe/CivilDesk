@@ -28,6 +28,11 @@ describe('verify-results gate (failures must reach CI as a non-zero exit)', () =
   it('fails when any test failed in any report', () => {
     expect(run({ records: [good('a'), good('b')], reports: [junit(4), junit(6, 2)] }).status).toBe(1);
   });
+  it('fails when SQLite reports foreign-key violations', () => {
+    const r = run({ records: [{ ...good('a'), foreignKeyViolations: 2 }], reports: [junit(1)] });
+    expect(r.status).toBe(1);
+    expect(r.output).toContain('foreign-key');
+  });
   it('fails when the application was still running after the shutdown timeout', () => {
     const r = run({ records: [{ spec: 'a', expectedVersion: 5, exists: true, appStillRunning: true, pids: [42] }], reports: [junit(1)] });
     expect(r.status).toBe(1);

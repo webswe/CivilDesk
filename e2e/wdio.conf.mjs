@@ -5,6 +5,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { e2eDataPaths, resetE2eData } from './lib/guard.mjs';
+import { seedUpgradeFixture } from './lib/fixture.mjs';
 import { expectedSchemaVersion, inspectDatabase } from './lib/db.mjs';
 import { waitForAppExit } from './lib/process.mjs';
 
@@ -70,7 +71,8 @@ export const config = {
   onComplete() { driver?.kill(); },
 
   // Every spec file starts from an empty E2E profile (this only ever deletes the E2E identity folders).
-  onWorkerStart: fatal(() => { resetE2eData(); }),
+  // A spec named *upgrade-v5* additionally gets a genuine schema-v5 database in that same disposable folder, written before the app starts.
+  onWorkerStart: fatal((_cid, _caps, specs = []) => { resetE2eData(); if (specs.some(spec => /upgrade-v5/.test(String(spec)))) seedUpgradeFixture(); }),
 
   // After the session closes: confirm the application really stopped, then take a consistent SQLite snapshot.
   // A timeout or a database error is recorded as a failure; nothing is ever inspected while the app may still run.

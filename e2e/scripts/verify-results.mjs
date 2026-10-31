@@ -21,6 +21,7 @@ for (const r of records) {
   else if (r.error) note(`${r.spec}: database could not be inspected: ${r.error}`);
   else {
     if (r.integrity !== 'ok') note(`${r.spec}: SQLite quick_check returned "${r.integrity}"`);
+    if (r.foreignKeyViolations > 0) note(`${r.spec}: ${r.foreignKeyViolations} SQLite foreign-key violation(s)`);
     if (r.userVersion !== r.expectedVersion) note(`${r.spec}: schema version ${r.userVersion}, expected ${r.expectedVersion}`);
     console.log(`ok  ${r.spec}: schema v${r.userVersion}, integrity ${r.integrity}, ${r.tables.length} tables`);
   }
