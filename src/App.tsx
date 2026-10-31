@@ -17,6 +17,9 @@ import { Button } from './components/ui/button';
 import { ProjectsPage } from './ProjectsPage';
 import { ChallengesPage } from './ChallengesPage';
 import { addChallengeEvidence, assignWeek, challengeAction, createChallengeProject, linkChallengeProject, loadChallenges, removeChallengeEvidence, saveChallengeSettings, weekStart, type ChallengeData } from './services/challenges';
+import { SchoolPage, type SchoolFocus } from './SchoolPage';
+import { contextLabel, courseworkItems, itemFor } from './domain/academic';
+import { loadAcademic, saveCourse, saveCoursework, saveSemester, setActiveSemester, setCourseArchived, setSemesterArchived, type AcademicData } from './services/academic';
 import { associateTask, deleteProjectItem, loadProjects, openProjectFile, saveJournalEntry, saveMilestone, saveProject, saveProjectFile, setMilestoneCompleted, type ProjectsData } from './services/projects';
 
 function Onboarding({ onDone }: { onDone: (name: string, visible: boolean, engagement: Engagement) => void }) {
@@ -52,18 +55,20 @@ export default function App() {
   const [workspace, setWorkspace] = useState<WorkspaceData | null>(null);
   const [projects, setProjects] = useState<ProjectsData | null>(null);
   const [challenges, setChallenges] = useState<ChallengeData | null>(null);
+  const [academic, setAcademic] = useState<AcademicData | null>(null);
+  const [schoolFocus, setSchoolFocus] = useState<SchoolFocus | null>(null);
   const [page, setPage] = useState('Dashboard');
   const [startNewTask, setStartNewTask] = useState(false);
   const [focusTask, setFocusTask] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [narrow, setNarrow] = useState(() => window.innerWidth <= 760);
   useEffect(() => { const onResize = () => setNarrow(window.innerWidth <= 760); window.addEventListener('resize', onResize); return () => window.removeEventListener('resize', onResize); }, []);
-  const go = (next: string) => { setStartNewTask(false); setPage(next); };
+  const go = (next: string) => { setStartNewTask(false); setSchoolFocus(null); setPage(next); };
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [reminderAlert, setReminderAlert] = useState('');
   const attemptedWeek = useRef('');
-  useEffect(() => { Promise.all([loadSnapshot(), loadWorkspace(), loadProjects(), loadChallenges()]).then(([s, w, p, c]) => { setSnapshot(s); setWorkspace(w); setProjects(p); setChallenges(c); }).catch(e => setError(String(e))); }, []);
+  useEffect(() => { Promise.all([loadSnapshot(), loadWorkspace(), loadProjects(), loadChallenges(), loadAcademic()]).then(([s, w, p, c, a]) => { setSnapshot(s); setWorkspace(w); setProjects(p); setChallenges(c); setAcademic(a); }).catch(e => setError(String(e))); }, []);
   useEffect(() => { document.documentElement.classList.toggle('reduced-motion', !!snapshot?.preferences.reducedMotion); }, [snapshot?.preferences.reducedMotion]);
   useEffect(() => {
     if (!workspace || !workspace.reminderPreferences.enabled) return;
@@ -87,7 +92,7 @@ export default function App() {
   async function update(next: AppSnapshot) { setSnapshot(next); setSaving(true); try { await saveSnapshot(next); setError(''); } catch (e) { setError('Could not save your changes: ' + String(e)); } finally { setSaving(false); } }
   async function mutate(operation: () => Promise<void>): Promise<boolean> {
     setSaving(true);
-    try { await operation(); const [w,p] = await Promise.all([loadWorkspace(),loadProjects()]); setWorkspace(w); setProjects(p); setError(''); return true; }
+    try { await operation(); const [w,p,a] = await Promise.all([loadWorkspace(),loadProjects(),loadAcademic()]); setWorkspace(w); setProjects(p); setAcademic(a); setError(''); return true; }
     catch (e) { setError('Could not save your changes: ' + String(e)); return false; }
     finally { setSaving(false); }
   }
@@ -97,6 +102,13 @@ export default function App() {
     if (!snapshot) return;
     const result = transitionPip(snapshot.companion.state, event, { focusMode: snapshot.preferences.focusMode || forceFocus, engagement: snapshot.preferences.engagement, lastReactionAt: new Date(snapshot.companion.updatedAt).getTime(), now: Date.now() });
     void update({ ...snapshot, companion: { ...snapshot.companion, state: result.state, updatedAt: new Date(result.lastReactionAt).toISOString() } });
+  }
+  /** Runs an academic save and returns its error text so the open dialog can show it. */
+  async function runAcademic(operation: () => Promise<void>): Promise<string | null> {
+    setSaving(true);
+    try { await operation(); const [w, a] = await Promise.all([loadWorkspace(), loadAcademic()]); setWorkspace(w); setAcademic(a); setError(''); return null; }
+    catch (e) { return e instanceof Error ? e.message : String(e); }
+    finally { setSaving(false); }
   }
   async function completeTask(id: string, value: boolean) {
     const previous = workspace?.progression.history.length || 0;
@@ -113,13 +125,16 @@ export default function App() {
     }
   }
   if (error && !snapshot) return <div className="fatal"><h1>CivilDesk could not open</h1><p>{error}</p><button onClick={() => window.location.reload()}>Try again</button></div>;
-  if (!snapshot || !workspace || !projects || !challenges) return <div className="loading">Opening CivilDesk…</div>;
+  if (!snapshot || !workspace || !projects || !challenges || !academic) return <div className="loading">Opening CivilDesk…</div>;
   if (!snapshot.preferences.onboardingComplete) return <>{error && <div role="alert" className="error-banner">{error}</div>}<Onboarding onDone={(name, visible, engagement) => void update({ ...snapshot, preferences: { ...snapshot.preferences, displayName: name, pipVisible: visible, engagement, onboardingComplete: true } })}/></>;
   const collapsed = snapshot.preferences.sidebarCollapsed || narrow;
   const { activeId, group: activeGroup } = locate(page);
   const scopeOf: Record<string, TaskScope> = { School: 'school', Personal: 'personal', Tasks: 'all', 'Engineering Tasks': 'engineering' };
   const pageForScope = (scope: TaskScope) => scope === 'school' ? 'School' : scope === 'personal' ? 'Personal' : scope === 'engineering' ? 'Engineering Tasks' : 'Tasks';
   const navButton = (item: NavItem, nested = false) => <button title={item.label} key={item.id} className={'nav-item ' + (nested ? 'nested ' : '') + (activeId === item.id ? 'active' : '')} aria-current={activeId === item.id ? 'page' : undefined} onClick={() => go(item.id)}><item.icon size={17} strokeWidth={1.8}/><span>{item.label}</span></button>;
+  const courseworkAll = courseworkItems(workspace.tasks, academic);
+  const openCoursework = (taskId: string) => { const item = itemFor(courseworkAll, taskId); if (!item) return; setStartNewTask(false); setSchoolFocus({ courseId: item.course.id, taskId }); setPage('School'); };
+  const academicLabel = (taskId: string) => contextLabel(itemFor(courseworkAll, taskId));
   const hidePip = () => void update({ ...snapshot, preferences: { ...snapshot.preferences, pipVisible: false } });
   const crumbParent = activeGroup ? activeGroup.label : activeId !== page ? pageLabel(activeId) : '';
   return <div className="shell"><aside className={'sidebar ' + (collapsed ? 'collapsed ' : '') + (narrow ? 'narrow' : '')}><div className="sidebar-top"><div className="brand"><span className="brand-mark small">C</span><span className="brand-name">CivilDesk</span></div><button className="icon-button collapse-button" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => void update({ ...snapshot, preferences: { ...snapshot.preferences, sidebarCollapsed: !collapsed } })}>{collapsed ? <Menu size={18}/> : <ChevronLeft size={18}/>}</button></div>
@@ -130,17 +145,18 @@ export default function App() {
     })}</nav>
     <div className="sidebar-bottom"><PipDock snapshot={snapshot} data={workspace} collapsed={collapsed} onPip={pip} open={() => go('Pip')}/><div className="utility-nav">{utilityNav.map(item => navButton(item))}</div><div className="account"><span className="avatar">{snapshot.preferences.displayName.charAt(0).toUpperCase() || 'C'}</span><span className="account-name">{snapshot.preferences.displayName}<small>Stored on this computer</small></span></div></div></aside>
     <main className="main"><header className="topbar"><nav className="breadcrumb" aria-label="Breadcrumb">{crumbParent && (activeGroup ? <span>{crumbParent}</span> : <button className="crumb-link" onClick={() => go(activeId)}>{crumbParent}</button>)}{crumbParent && <ChevronRight size={14}/>}<strong aria-current="page">{pageLabel(page)}</strong></nav><div className="top-actions">{saving && <span className="save-status" role="status">Saving…</span>}</div></header>{error && <div role="alert" className="error-banner">{error}</div>}{reminderAlert && <div className="reminder-banner" role="status"><span>{reminderAlert}</span><button aria-label="Dismiss reminder" onClick={() => setReminderAlert('')}>Dismiss</button></div>}<div className="content">
-    {page === 'Calendar' ? <CalendarPage data={workspace} projects={projects} challenges={challenges} save={async event => mutate(() => saveEvent(event))} remove={async id => { await mutate(() => deleteEvent(id)); }}/>
+    {page === 'Calendar' ? <CalendarPage data={workspace} projects={projects} challenges={challenges} academic={academic} openCoursework={openCoursework} save={async event => mutate(() => saveEvent(event))} remove={async id => { await mutate(() => deleteEvent(id)); }}/>
       : page === 'Notifications' ? <NotificationsPage data={workspace} save={async prefs => { await mutate(() => saveReminderPreferences(prefs)); }}/>
       : page === 'Weekly Challenges' || page === 'Skills' ? <ChallengesPage key={page} initialTab={page === 'Skills' ? 'skills' : 'board'} data={challenges} projects={projects} refresh={async()=>{const [c,p]=await Promise.all([loadChallenges(),loadProjects()]);setChallenges(c);setProjects(p)}} saveSettings={saveChallengeSettings} assign={assignWeek} act={async(id,action,options)=>{await challengeAction(id,action,options);if(action==='complete'&&challenges.progress.find(p=>p.challengeId===id)?.status!=='Completed')pip('ENGINEERING_ACCOMPLISHMENT')}} evidence={addChallengeEvidence} removeEvidence={removeChallengeEvidence} link={linkChallengeProject} createProject={async id=>{const existing=challenges.projects.some(p=>p.challengeId===id&&p.createdFromChallenge);await createChallengeProject(id);if(!existing)pip('ENGINEERING_ACCOMPLISHMENT')}}/>
+      : page === 'School' ? <SchoolPage key={schoolFocus ? schoolFocus.taskId : 'school'} data={workspace} academic={academic} focus={schoolFocus} startWithNew={startNewTask} onScope={scope => go(pageForScope(scope))} run={runAcademic} ops={{ saveSemester, setActive: setActiveSemester, archiveSemester: setSemesterArchived, saveCourse, archiveCourse: setCourseArchived, saveCoursework }} save={async (task: TaskInput) => mutate(() => saveTask(task))} remove={async id => { await mutate(() => deleteTask(id)); }} complete={completeTask} startFocus={id => { setFocusTask(id); go('Focus Sessions'); }}/>
       : page in scopeOf ? <TasksPage data={workspace} scope={scopeOf[page]!} startWithNew={startNewTask} onScope={scope => go(pageForScope(scope))} save={async (task: TaskInput) => mutate(() => saveTask(task))} remove={async id => { await mutate(() => deleteTask(id)); }} complete={completeTask}/>
       : page === 'Projects' || page === 'Engineering Journal' ? <ProjectsPage data={projects} workspace={workspace} saveProject={p=>mutate(()=>saveProject(p))} saveMilestone={m=>mutate(()=>saveMilestone(m))} completeMilestone={async(id,value)=>{await mutate(()=>setMilestoneCompleted(id,value))}} deleteItem={async(kind,id)=>{await mutate(()=>deleteProjectItem(kind,id))}} associateTask={async(taskId,projectId)=>{await mutate(()=>associateTask(taskId,projectId))}} saveTask={t=>mutate(()=>saveTask(t))} completeTask={completeTask} saveFile={f=>mutate(()=>saveProjectFile(f))} openFile={async id=>{try{await openProjectFile(id)}catch(e){setError(String(e))}}} saveJournal={j=>mutate(()=>saveJournalEntry(j))}/>
-      : page === 'Focus Sessions' ? <FocusPage data={workspace} initialTaskId={focusTask} defaults={async (d, b) => mutate(() => setFocusDefaults(d, b))} action={actFocus}/>
+      : page === 'Focus Sessions' ? <FocusPage data={workspace} initialTaskId={focusTask} taskLabel={academicLabel} defaults={async (d, b) => mutate(() => setFocusDefaults(d, b))} action={actFocus}/>
       : page === 'Settings' ? <Settings snapshot={snapshot} update={next => void update(next)}/>
       : page === 'Pip' ? <div className="page-panel"><PipTabs current="Pip" goTo={go}/><h1>Pip</h1><p>A gentle presence for your workday. Pip follows your pace.</p>{snapshot.preferences.pipVisible ? <div className="pip-page"><PipCard snapshot={snapshot} data={workspace} onPip={pip} onHide={hidePip}/></div> : <div className="empty-state"><h2>Pip is taking a break</h2><p>Bring Pip back whenever you like. Your level and rewards are kept.</p><button className="primary-button" onClick={() => void update({ ...snapshot, preferences: { ...snapshot.preferences, pipVisible: true } })}>Show Pip</button></div>}</div>
       : page === 'Customization' ? <CustomizationPage data={workspace} goTo={go} state={snapshot.companion.state} reducedMotion={snapshot.preferences.reducedMotion} equip={async (id, equipped) => { await mutate(() => equipCosmetic(id, equipped)); }}/>
       : page === 'Achievements' ? <AchievementsPage data={workspace} goTo={go}/>
       : page === 'About and Updates' ? <div className="page-panel"><h1>About CivilDesk</h1><p>A local-first workspace for school, personal planning and engineering work. Your data stays on this computer.</p><div className="roadmap"><h2>What works today</h2><p>Tasks, a unified calendar, focus sessions, engineering projects, weekly challenges and skills, reminders, and Pip with achievements and wardrobe.</p><h2>What comes next</h2><p>Course management, notes, portfolio tools and new Pip cosmetics arrive in later milestones. Nothing in the sidebar is a placeholder.</p></div></div>
-      : <MyDay name={snapshot.preferences.displayName} data={workspace} projects={projects} challenges={challenges} complete={completeTask} goTo={go} newTask={() => { setStartNewTask(true); setPage('Tasks'); }} startFocus={id => { setFocusTask(id ?? ''); go('Focus Sessions'); }}/>}
+      : <MyDay name={snapshot.preferences.displayName} academic={academic} openCoursework={openCoursework} data={workspace} projects={projects} challenges={challenges} complete={completeTask} goTo={go} newTask={() => { setStartNewTask(true); setPage('Tasks'); }} startFocus={id => { setFocusTask(id ?? ''); go('Focus Sessions'); }}/>}
   </div></main></div>;
 }
