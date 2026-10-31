@@ -1,0 +1,102 @@
+/* Phase 3B.2 — calmer hierarchy. Loaded after styles.css so it refines the shared primitives. */
+
+/* Pages sit directly on the canvas instead of inside a bordered panel. Cards are for grouped content only. */
+.page-panel { border: 0; background: transparent; box-shadow: none; padding: 0; max-width: 860px; }
+.page-panel.wide-panel { max-width: 1040px; }
+.page-panel.projects-panel, .page-panel.calendar-panel { max-width: 1180px; }
+.page-panel h1 { font-size: 28px; margin: 0 0 6px; }
+.page-panel > p, .page-head p { font-size: 13px; margin-bottom: 0; }
+.content { padding: 30px 40px 64px; }
+.topbar, .sidebar-top { height: 56px; }
+.topbar { padding: 0 40px; }
+.eyebrow { font-size: 10px; letter-spacing: .14em; }
+
+/* Navigation */
+.sidebar nav { flex: 1; padding: 12px 10px; }
+.nav-item { height: 36px; margin-bottom: 2px; font-size: 13px; }
+.nav-item.nested { padding-left: 38px; height: 32px; font-size: 12.5px; }
+.nav-group-toggle .chevron { margin-left: auto; transition: transform .15s; }
+.nav-group-toggle[aria-expanded="true"] .chevron { transform: rotate(90deg); }
+.nav-group-toggle.has-active { color: #f5eff0; box-shadow: inset 2px 0 #d9a4b1; }
+.sidebar-bottom { flex-direction: column; align-items: stretch; gap: 6px; padding: 10px; min-height: 0; margin-top: 0; }
+.utility-nav { display: grid; gap: 1px; }
+.utility-nav .nav-item { height: 30px; font-size: 12px; margin: 0; }
+.account { display: flex; align-items: center; gap: 10px; padding: 8px 8px 2px; border-top: 1px solid #493a45; }
+.collapsed .brand-name, .collapsed .account-name { display: none; }
+.collapsed .account { justify-content: center; padding-left: 0; padding-right: 0; }
+.collapsed .collapse-button { top: 40px; }
+.sidebar.narrow .collapse-button { display: none; }
+.pip-dock { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 10px; }
+.pip-dock-art { width: 46px; height: 46px; padding: 0; border: 0; background: transparent; border-radius: 12px; flex: none; }
+.pip-dock-art:hover { background: #42323e; }
+.pip-dock-text { border: 0; background: transparent; color: #f5eff0; font-size: 12.5px; font-weight: 650; text-align: left; padding: 4px; border-radius: 6px; }
+.pip-dock-text small { display: block; color: #98808c; font-weight: 400; font-size: 11px; margin-top: 1px; }
+.pip-dock-text:hover { color: #fff; }
+.collapsed .pip-dock { justify-content: center; padding: 4px 0; }
+.breadcrumb .crumb-link { background: none; border: 0; color: #a995a0; padding: 0; font-size: 12px; }
+.breadcrumb .crumb-link:hover { color: #f5eff0; text-decoration: underline; }
+
+/* Shared primitives */
+.segmented { display: inline-flex; gap: 2px; background: #291f27; border: 1px solid #493a45; border-radius: 10px; padding: 3px; margin: 18px 0 0; flex-wrap: wrap; }
+.segmented button { border: 0; background: transparent; color: #b9a9b0; border-radius: 7px; padding: 6px 13px; font-size: 12.5px; display: inline-flex; gap: 7px; align-items: center; }
+.segmented button:hover { color: #f5eff0; }
+.segmented button.active { background: #644551; color: #fff1f2; font-weight: 650; }
+.segmented button span { font-size: 11px; opacity: .75; }
+.toolbar { margin: 14px 0 8px; }
+.task-row { padding: 14px 0; }
+.task-meta { gap: 6px; margin-top: 6px; }
+.task-meta span, .tag { font-size: 11px; color: #cbb4bf; background: transparent; border: 1px solid #54414c; padding: 2px 8px; border-radius: 20px; }
+.task-meta span.overdue, .tag.overdue { color: #f2b3c0; border-color: #8b4a5b; }
+.task-meta span.high { color: #f0cfa8; border-color: #7d6340; }
+.empty-state { border: 0; background: #2b222a; padding: 40px 20px; }
+.more-options { margin: 14px 0 0; border-top: 1px solid #54414c; padding-top: 10px; }
+.more-options summary { cursor: pointer; font-size: 12.5px; color: #dbc0cb; padding: 4px 0; }
+.more-options summary:hover { color: #fff; }
+.primary-button, .soft-button { min-height: 36px; }
+.reminder-banner { padding: 10px 40px; }
+
+/* My Day */
+.myday { max-width: 1040px; }
+.day-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.day-head h1 { font-family: Georgia, serif; font-weight: 400; font-size: 30px; margin: 0 0 4px; }
+.day-head p { margin: 0; font-size: 13px; }
+.next-up { display: flex; justify-content: space-between; align-items: center; gap: 18px; flex-wrap: wrap; margin: 22px 0 28px; padding: 16px 20px; background: #352a32; border: 1px solid #5a4350; border-radius: 14px; }
+.next-up > div { min-width: 0; flex: 1 1 260px; }
+.next-up .label { display: block; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: #d6a4af; font-weight: 750; margin-bottom: 4px; }
+.next-up strong { display: block; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.next-up small { display: block; color: #b9a9b0; font-size: 12px; margin-top: 3px; }
+.day-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(250px, 1fr); gap: 40px; align-items: start; }
+.day-grid h2 { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: #a995a0; font-weight: 700; margin: 0 0 8px; }
+.day-grid aside { display: grid; gap: 28px; }
+.day-list { list-style: none; margin: 0 0 6px; padding: 0; }
+.day-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid #3f323b; }
+.day-row-text { flex: 1; min-width: 0; }
+.day-row-text strong { display: block; font-size: 14px; font-weight: 550; overflow-wrap: anywhere; }
+.day-row-text small { display: block; font-size: 12px; color: #a995a0; margin-top: 2px; }
+.day-time { flex: none; width: 82px; font-size: 12px; color: #d6a4af; }
+.day-row.event .day-time { color: #e5b8c2; }
+.day-progress { display: flex; align-items: center; gap: 12px; margin: 16px 0 6px; font-size: 12px; color: #b9a9b0; }
+.day-progress progress { flex: 1; max-width: 220px; height: 6px; }
+.quiet-note { font-size: 13px; margin: 6px 0 8px; }
+.text-link { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; margin-top: 10px; }
+.text-link:hover { color: #fff; }
+.inline-card { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; text-align: left; background: #30262e; border: 1px solid #54414c; border-radius: 12px; padding: 12px 14px; color: #f5eff0; }
+.inline-card:hover { border-color: #a87486; }
+.inline-card strong { display: block; font-size: 13.5px; font-weight: 600; }
+.inline-card small { display: block; color: #a995a0; font-size: 12px; margin-top: 2px; }
+
+/* Pip page: a single calm card */
+.pip-card { padding: 20px; background: #30262e; box-shadow: none; }
+.pip-card .card-heading h2 { font-size: 17px; margin: 0; }
+.pip-interaction { width: 160px; height: 160px; }
+.pip-page { width: min(100%, 340px); margin-top: 18px; }
+
+@media (max-width: 900px) {
+  .day-grid { grid-template-columns: 1fr; gap: 28px; }
+  .content { padding: 24px 22px 56px; }
+  .topbar { padding: 0 22px; }
+}
+@media (max-width: 720px) {
+  .content { padding: 20px 16px 48px; }
+  .day-time { width: 68px; }
+}
