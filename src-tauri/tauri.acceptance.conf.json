@@ -1,0 +1,30 @@
+{
+  "productName": "CivilDesk Acceptance",
+  "identifier": "com.webswe.civildesk.acceptance",
+  "mainBinaryName": "civildesk-acceptance",
+  "app": {
+    "appDirectoriesOverride": {
+      "data": "$DATA/com.webswe.civildesk.acceptance",
+      "localData": "$LOCALDATA/com.webswe.civildesk.acceptance"
+    },
+    "windows": [
+      {
+        "title": "CivilDesk Acceptance",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 650,
+        "minHeight": 600,
+        "backgroundColor": "#211B20"
+      }
+    ]
+  },
+  "bundle": {
+    "createUpdaterArtifacts": false,
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "startMenuFolder": "CivilDesk Acceptance"
+      }
+    }
+  }
+}

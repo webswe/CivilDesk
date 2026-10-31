@@ -1,0 +1,44 @@
+name: Acceptance Windows installer
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - run: node scripts/check-acceptance-config.mjs
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - run: npm run tauri build -- --bundles nsis --config src-tauri/tauri.acceptance.conf.json
+      - name: Verify acceptance installer name
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem -LiteralPath 'src-tauri/target/release/bundle/nsis' -Filter 'CivilDesk Acceptance_*-setup.exe' -File)
+          if ($files.Count -ne 1) { throw "Expected one CivilDesk Acceptance installer; found $($files.Count)." }
+          if ($files[0].Name -notmatch '^CivilDesk Acceptance_[0-9]+\.[0-9]+\.[0-9]+_x64-setup\.exe$') { throw "Unexpected installer name: $($files[0].Name)" }
+          Get-FileHash -LiteralPath $files[0].FullName -Algorithm SHA256 | Format-List
+      - name: Upload acceptance installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: CivilDesk-Acceptance-Windows-NSIS
+          path: src-tauri/target/release/bundle/nsis/CivilDesk Acceptance_*-setup.exe
+          if-no-files-found: error
+          retention-days: 14
