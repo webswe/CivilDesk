@@ -17,7 +17,9 @@ concurrency:
   cancel-in-progress: true
 jobs:
   e2e:
-    runs-on: windows-latest
+    # windows-2022 on purpose: Tauri/WebView2 WebDriver sessions failed on the windows-latest (Server 2025) image with
+    # "DevToolsActivePort file doesn't exist" (see actions/runner-images#14738, MicrosoftEdge/WebView2Feedback#5415).
+    runs-on: windows-2022
     timeout-minutes: 60
     env:
       CI: 'true'
@@ -75,6 +77,9 @@ jobs:
           & "$HOME/.cargo/bin/msedgedriver-tool.exe"
           $PWD.Path | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
           Get-ChildItem msedgedriver.exe | Format-List Name, Length
+      - name: Native startup diagnostic (standalone launch, before WebDriver)
+        shell: pwsh
+        run: ./e2e/scripts/diagnose-startup.ps1
       - name: Run acceptance tests
         working-directory: e2e
         run: |

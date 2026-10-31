@@ -96,3 +96,7 @@ Local, 2026-10-31 (no native execution possible on this machine):
 - Test dates use the runner clock and time zone; a run spanning midnight could flake.
 - Debug build is used for speed; it does not prove release-profile behaviour.
 - The suite does not run `cargo`-level tests; those stay in CI.
+
+## 10. First native run and recovery
+
+Smoke run `41230977956` (windows-latest, Windows Server 2025) built the binary, installed the drivers and reached WebDriver, but session creation failed with `DevToolsActivePort file doesn't exist`, a signature matching actions/runner-images#14738. The workflow now (a) runs on `windows-2022`, and (b) runs `e2e/scripts/diagnose-startup.ps1` before WebDriver. The diagnostic launches only `civildesk-e2e.exe`, records process lifetime, window title, WebView2 child processes and their command lines, DevToolsActivePort files, a screenshot and a loopback probe of a debug port, then terminates only that process tree and removes only the E2E identity folders. The debug-port environment variable is scoped to that single launch and restored afterwards. An unanswered debug port is not conclusive: Tauri/WebView2 may override the environment arguments.
