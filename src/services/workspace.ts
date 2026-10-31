@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import type { CalendarEvent, ReminderPreferences } from './calendar';
 
 export interface Subtask { id: string; title: string; done: boolean }
 export interface Task {
@@ -18,7 +19,8 @@ export interface Progression {
   scarf: boolean; headphones: boolean; history: RewardEvent[];
 }
 export interface WorkspaceData {
-  tasks: Task[]; sessions: FocusSession[]; focusDurationMinutes: number; breakDurationMinutes: number; progression: Progression;
+  tasks: Task[]; sessions: FocusSession[]; events: CalendarEvent[]; reminderPreferences: ReminderPreferences;
+  focusDurationMinutes: number; breakDurationMinutes: number; progression: Progression;
 }
 export const achievementDefinitions = [
   { id: 'first_task', title: 'First step', requirement: 'Complete your first task', cosmetic: 'Rosewood scarf' },
@@ -36,9 +38,10 @@ export const cosmeticDefinitions = [
 
 const native = () => '__TAURI_INTERNALS__' in window;
 const preview: WorkspaceData = {
-  tasks: [], sessions: [], focusDurationMinutes: 25, breakDurationMinutes: 5,
+  tasks: [], sessions: [], events: [], reminderPreferences: { enabled: true, quietStart: '22:00', quietEnd: '08:00' }, focusDurationMinutes: 25, breakDurationMinutes: 5,
   progression: { xp: 0, level: 1, earned: [], unlocked: [], styleId: 'classic', scarf: false, headphones: false, history: [] },
 };
+export function previewWorkspace(): WorkspaceData { return preview; }
 const clone = <T,>(value: T): T => structuredClone(value);
 export async function loadWorkspace(): Promise<WorkspaceData> {
   return native() ? invoke<WorkspaceData>('load_workspace') : clone(preview);

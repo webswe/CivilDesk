@@ -1,3 +1,4 @@
+use crate::calendar::{read_events, read_preferences, CalendarEvent, ReminderPreferences};
 use crate::persistence::Database;
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
@@ -202,6 +203,8 @@ pub struct Progression {
 pub struct WorkspaceData {
     pub tasks: Vec<Task>,
     pub sessions: Vec<FocusSession>,
+    pub events: Vec<CalendarEvent>,
+    pub reminder_preferences: ReminderPreferences,
     pub focus_duration_minutes: i64,
     pub break_duration_minutes: i64,
     pub progression: Progression,
@@ -251,9 +254,13 @@ impl Database {
         let history=c.prepare("SELECT id,kind,source_id,CAST(occurred_at AS INTEGER),xp FROM reward_events ORDER BY CAST(occurred_at AS INTEGER) DESC LIMIT 50").map_err(|e|e.to_string())?
             .query_map([],|r|Ok(RewardEvent{id:r.get(0)?,kind:r.get(1)?,source_id:r.get(2)?,occurred_at_ms:r.get(3)?,xp:r.get(4)?})).map_err(|e|e.to_string())?
             .collect::<rusqlite::Result<Vec<_>>>().map_err(|e|e.to_string())?;
+        let events = read_events(&c)?;
+        let reminder_preferences = read_preferences(&c)?;
         Ok(WorkspaceData {
             tasks,
             sessions,
+            events,
+            reminder_preferences,
             focus_duration_minutes,
             break_duration_minutes,
             progression: Progression {
@@ -526,14 +533,33 @@ mod tests {
         std::fs::remove_file(p).unwrap()
     }
     #[test]
+    fn task_create_edit_delete_round_trip() {
+        let (d, p) = db();
+        d.save_task(task("edit-me")).unwrap();
+        assert_eq!(d.workspace().unwrap().tasks[0].title, "Draft section");
+        let mut updated = task("edit-me");
+        updated.title = "Review calculations".into();
+        updated.due_date = Some("2026-11-03".into());
+        updated.due_time = Some("14:30".into());
+        d.save_task(updated).unwrap();
+        assert_eq!(d.workspace().unwrap().tasks.len(), 1);
+        assert_eq!(d.workspace().unwrap().tasks[0].title, "Review calculations");
+        d.delete_task("edit-me").unwrap();
+        assert!(d.workspace().unwrap().tasks.is_empty());
+        drop(d);
+        std::fs::remove_file(p).unwrap();
+    }
+    #[test]
     fn focus_cannot_finish_early() {
         let (d, p) = db();
         d.focus_action("start", "session", None, 1, 5).unwrap();
         assert!(d.focus_action("complete", "session", None, 0, 0).is_err());
-        d.focus_action("pause", "session", None, 0, 0).unwrap();
         drop(d);
         let d = Database::open(&p).unwrap();
         assert_eq!(d.workspace().unwrap().sessions[0].status, "paused");
+        assert_eq!(d.workspace().unwrap().sessions[0].elapsed_ms, 0);
+        d.focus_action("resume", "session", None, 0, 0).unwrap();
+        d.focus_action("pause", "session", None, 0, 0).unwrap();
         d.focus_action("stop", "session", None, 0, 0).unwrap();
         assert_eq!(d.workspace().unwrap().progression.xp, 0);
         drop(d);

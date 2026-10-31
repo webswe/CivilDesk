@@ -53,4 +53,27 @@ describe('first-run workspace', () => {
     await waitFor(() => expect(screen.queryByText('Review bridge drawing')).not.toBeInTheDocument());
     confirm.mockRestore();
   });
+
+  it('creates and removes an all-day calendar event', async () => {
+    render(<App/>);
+    fireEvent.change(await screen.findByLabelText('What should we call you?'), { target: { value: 'Jordan' } });
+    fireEvent.click(screen.getByRole('button', { name: /Enter CivilDesk/ }));
+    await screen.findByText(/Good to have you here, Jordan/);
+    fireEvent.click(screen.getByRole('button', { name: 'Calendar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New event' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'Site visit' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'All-day event' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save event' }));
+    expect(await screen.findByText('Site visit')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Site visit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Title' }), { target: { value: 'Updated site visit' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save event' }));
+    expect(await screen.findByText('Updated site visit')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Updated site visit' }));
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(screen.queryByText('Updated site visit')).not.toBeInTheDocument());
+    confirm.mockRestore();
+  });
 });

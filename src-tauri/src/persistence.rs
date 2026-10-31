@@ -153,9 +153,9 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     let version: u32 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|e| format!("Could not read database schema version: {e}"))?;
-    if version > 2 {
+    if version > 3 {
         return Err(format!(
-            "Database schema version {version} is newer than supported version 2"
+            "Database schema version {version} is newer than supported version 3"
         ));
     }
     if version == 0 {
@@ -190,6 +190,28 @@ fn migrate(conn: &Connection) -> Result<(), String> {
             INSERT INTO pip_customization VALUES (1, 'classic', 0, 0);
             ALTER TABLE reward_events ADD COLUMN xp INTEGER NOT NULL DEFAULT 0;
             PRAGMA user_version = 2; COMMIT;")
+            .map_err(|e| e.to_string())?;
+    }
+    if version < 3 {
+        conn.execute_batch("BEGIN IMMEDIATE;
+            CREATE TABLE calendar_events (
+                id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL,
+                start_date TEXT NOT NULL, start_time TEXT, end_date TEXT NOT NULL, end_time TEXT,
+                all_day INTEGER NOT NULL, time_zone TEXT NOT NULL,
+                start_at_ms INTEGER, end_at_ms INTEGER, reminder_offset_minutes INTEGER,
+                created_at_ms INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL
+            );
+            CREATE INDEX calendar_events_start ON calendar_events(start_date, start_time);
+            CREATE TABLE reminder_preferences (
+                id INTEGER PRIMARY KEY CHECK(id = 1), enabled INTEGER NOT NULL,
+                quiet_start TEXT NOT NULL, quiet_end TEXT NOT NULL
+            );
+            INSERT INTO reminder_preferences VALUES (1, 1, '22:00', '08:00');
+            CREATE TABLE reminder_deliveries (
+                source_kind TEXT NOT NULL, source_id TEXT NOT NULL, scheduled_at_ms INTEGER NOT NULL,
+                delivered_at_ms INTEGER NOT NULL, PRIMARY KEY(source_kind,source_id,scheduled_at_ms)
+            );
+            PRAGMA user_version = 3; COMMIT;")
             .map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -254,7 +276,7 @@ mod tests {
                     .unwrap()
                     .pragma_query_value(None, "user_version", |row| row.get(0))
                     .unwrap();
-            assert_eq!(version, 2);
+            assert_eq!(version, 3);
         }
         std::fs::remove_file(path).unwrap();
     }
@@ -274,7 +296,7 @@ mod tests {
         let path = unique_test_path();
         {
             let connection = Connection::open(&path).unwrap();
-            connection.execute_batch("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO app_state VALUES ('marker', 'keep'); PRAGMA user_version = 3;").unwrap();
+            connection.execute_batch("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO app_state VALUES ('marker', 'keep'); PRAGMA user_version = 4;").unwrap();
         }
         assert!(Database::open(&path).is_err());
         let connection = Connection::open(&path).unwrap();
@@ -310,7 +332,7 @@ mod tests {
                 .unwrap()
                 .pragma_query_value(None, "user_version", |r| r.get(0))
                 .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
         drop(db);
         std::fs::remove_file(path).unwrap();
     }

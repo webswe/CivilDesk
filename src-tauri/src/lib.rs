@@ -1,6 +1,8 @@
+mod calendar;
 mod persistence;
 mod productivity;
 
+use calendar::CalendarInput;
 use persistence::{AppSnapshot, Database};
 use productivity::{TaskInput, WorkspaceData};
 use tauri::Manager;
@@ -97,6 +99,40 @@ fn equip_cosmetic(
     state.database()?.equip_cosmetic(&id, equipped)
 }
 
+#[tauri::command]
+fn save_event(state: tauri::State<'_, RuntimeState>, event: CalendarInput) -> Result<(), String> {
+    state.database()?.save_event(event)
+}
+
+#[tauri::command]
+fn delete_event(state: tauri::State<'_, RuntimeState>, id: String) -> Result<(), String> {
+    state.database()?.delete_event(&id)
+}
+
+#[tauri::command]
+fn save_reminder_preferences(
+    state: tauri::State<'_, RuntimeState>,
+    enabled: bool,
+    quiet_start: String,
+    quiet_end: String,
+) -> Result<(), String> {
+    state
+        .database()?
+        .save_reminder_preferences(enabled, &quiet_start, &quiet_end)
+}
+
+#[tauri::command]
+fn claim_reminder(
+    state: tauri::State<'_, RuntimeState>,
+    kind: String,
+    id: String,
+    scheduled_at_ms: i64,
+) -> Result<bool, String> {
+    state
+        .database()?
+        .claim_reminder(&kind, &id, scheduled_at_ms)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -134,7 +170,11 @@ pub fn run() {
             set_task_completed,
             set_focus_defaults,
             focus_action,
-            equip_cosmetic
+            equip_cosmetic,
+            save_event,
+            delete_event,
+            save_reminder_preferences,
+            claim_reminder
         ])
         .run(tauri::generate_context!())
         .expect("CivilDesk could not start");
