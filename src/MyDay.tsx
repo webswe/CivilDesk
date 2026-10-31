@@ -6,16 +6,19 @@ import type { Task, WorkspaceData } from './services/workspace';
 import type { ChallengeData } from './services/challenges';
 import type { ProjectsData } from './services/projects';
 import type { AcademicData } from './services/academic';
+import type { StudyBlock, StudyData } from './services/study';
+import { agendaStudy, blockState, timeRange } from './domain/study';
+import { Play as PlayIcon } from 'lucide-react';
 import { contextLabel, courseworkItems, itemFor } from './domain/academic';
 
 function greeting(now: Date): string { const h = now.getHours(); return h < 5 ? 'Still up' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'; }
 
 interface Props {
-  name: string; academic: AcademicData; openCoursework: (taskId: string) => void; data: WorkspaceData; projects: ProjectsData; challenges: ChallengeData;
+  name: string; academic: AcademicData; study: StudyData; openStudyBlock: (blockId: string) => void; startBlock: (block: StudyBlock) => void; openCoursework: (taskId: string) => void; data: WorkspaceData; projects: ProjectsData; challenges: ChallengeData;
   complete: (id: string, value: boolean) => Promise<void>;
   goTo: (page: string) => void; newTask: () => void; startFocus: (taskId: string | null) => void;
 }
-export function MyDay({ name, academic, openCoursework, data, projects, challenges, complete, goTo, newTask, startFocus }: Props) {
+export function MyDay({ name, academic, study, openStudyBlock, startBlock, openCoursework, data, projects, challenges, complete, goTo, newTask, startFocus }: Props) {
   const now = new Date();
   const coursework = courseworkItems(data.tasks, academic);
   const areaText = (t: Task) => contextLabel(itemFor(coursework, t.id)) || areaLabels[taskArea(t.category, Boolean(t.projectId))];
@@ -23,7 +26,9 @@ export function MyDay({ name, academic, openCoursework, data, projects, challeng
   const dueNow: Task[] = [...agenda.overdue, ...agenda.todayTasks];
   const remaining = dueNow.length;
   const total = remaining + agenda.doneToday;
-  const nothingToday = !agenda.schedule.length && !remaining;
+  const dayStudy = agendaStudy(study, now);
+  const courseCode = (id: string) => academic.courses.find(c => c.id === id)?.code ?? '';
+  const nothingToday = !agenda.schedule.length && !remaining && !dayStudy.today.length;
   const row = (t: Task) => { const due = t.dueDate ? formatDue(t.dueDate, t.dueTime, now) : null; return <li key={t.id} className="day-row">
     <button className="task-check" aria-label={'Complete ' + t.title} onClick={() => void complete(t.id, true)}/>
     <span className="day-row-text"><strong>{t.title}</strong><small>{[itemFor(coursework, t.id) ? <button key="course" className="context-link" aria-label={'Open ' + t.title + ' in ' + itemFor(coursework, t.id)!.course.code} onClick={() => openCoursework(t.id)}>{areaText(t)}</button> : areaText(t), due && (due.overdue ? due.text : t.dueTime ? 'at ' + t.dueTime : ''), t.priority === 'high' ? 'High priority' : ''].filter(Boolean).flatMap((x, i) => i ? [' · ', x] : [x])}</small></span>
@@ -43,7 +48,10 @@ export function MyDay({ name, academic, openCoursework, data, projects, challeng
         <h2 id="today-heading">Today</h2>
         {nothingToday ? <p className="quiet-note">Nothing scheduled and nothing due. {total > 0 ? 'Everything planned for today is done.' : 'Enjoy the open space, or plan something.'}</p>
           : <>{agenda.schedule.length > 0 && <ul className="day-list" aria-label="Today's schedule">{agenda.schedule.map(e => <li key={e.key} className="day-row event"><span className="day-time">{e.time ?? 'All day'}</span><span className="day-row-text"><strong>{e.title}</strong>{e.time && <small>{e.note}</small>}</span></li>)}</ul>}
-            {remaining > 0 && <ul className="day-list" aria-label="Tasks for today">{dueNow.map(row)}</ul>}</>}
+            {remaining > 0 && <ul className="day-list" aria-label="Tasks for today">{dueNow.map(row)}</ul>}
+            {dayStudy.today.length > 0 && <ul className="day-list" aria-label="Study blocks today">{dayStudy.today.map(b => { const missed = blockState(b, study.sessions, now) === 'missed'; const label = b.title || 'Study session';
+              return <li key={b.id} className="day-row study"><span className="day-time">{b.startTime}</span><span className="day-row-text"><strong>{label}</strong><small><button className="context-link" aria-label={'Open study block ' + label} onClick={() => openStudyBlock(b.id)}>{'Study · ' + courseCode(b.courseId)}</button>{' · ' + timeRange(b) + (missed ? ' · Earlier today' : '')}</small></span>
+                <button className="soft-button" aria-label={'Start studying ' + label} onClick={() => startBlock(b)}><PlayIcon size={13}/> Start</button></li>; })}</ul>}</>}
         {total > 0 && <div className="day-progress" aria-label="Today's progress"><progress max={total} value={agenda.doneToday} aria-label="Tasks completed today"/><span>{agenda.doneToday} of {total} done{agenda.focusMinutesToday > 0 ? ' · ' + agenda.focusMinutesToday + ' min focused' : ''}</span></div>}
         {total === 0 && agenda.focusMinutesToday > 0 && <p className="quiet-note">{agenda.focusMinutesToday} min focused today.</p>}
         <button className="text-link" onClick={() => goTo('Tasks')}>All tasks <ChevronRight size={13}/></button>
@@ -51,7 +59,7 @@ export function MyDay({ name, academic, openCoursework, data, projects, challeng
       <aside>
         <section aria-labelledby="upcoming-heading">
           <h2 id="upcoming-heading">Coming up</h2>
-          {agenda.upcoming.length ? <ul className="day-list">{agenda.upcoming.slice(0, 6).map(u => <li key={u.key} className="day-row"><span className="day-time">{relativeDay(u.date, now)}</span><span className="day-row-text"><strong>{u.title}</strong>{(u.kind === 'challenge' || u.kind === 'milestone') ? <small>{u.note}</small> : (u.taskId && itemFor(coursework, u.taskId)) || u.time ? <small>{[u.taskId ? contextLabel(itemFor(coursework, u.taskId)) : '', u.time].filter(Boolean).join(' · ')}</small> : null}</span></li>)}</ul>
+          {(agenda.upcoming.length || dayStudy.coming.length) ? <ul className="day-list">{[...agenda.upcoming.map(u => ({ ...u, study: false as const, sort: u.date + ' ' + (u.time ?? '') })), ...dayStudy.coming.map(b => ({ key: 's' + b.id, kind: 'study' as const, title: b.title || 'Study · ' + courseCode(b.courseId), date: b.startDate, time: b.startTime, note: timeRange(b), taskId: undefined, study: true as const, sort: b.startDate + ' ' + b.startTime }))].sort((a, b) => a.sort.localeCompare(b.sort)).slice(0, 6).map(u => u.study ? <li key={u.key} className="day-row study"><span className="day-time">{relativeDay(u.date, now)}</span><span className="day-row-text"><strong>{u.title}</strong><small>{'Study · ' + u.note}</small></span></li> : <li key={u.key} className="day-row"><span className="day-time">{relativeDay(u.date, now)}</span><span className="day-row-text"><strong>{u.title}</strong>{(u.kind === 'challenge' || u.kind === 'milestone') ? <small>{u.note}</small> : (u.taskId && itemFor(coursework, u.taskId)) || u.time ? <small>{[u.taskId ? contextLabel(itemFor(coursework, u.taskId)) : '', u.time].filter(Boolean).join(' · ')}</small> : null}</span></li>)}</ul>
             : <p className="quiet-note">Nothing due in the next week.</p>}
           <button className="text-link" onClick={() => goTo('Calendar')}>Open calendar <ChevronRight size={13}/></button>
         </section>

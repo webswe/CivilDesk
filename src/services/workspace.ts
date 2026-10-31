@@ -13,7 +13,10 @@ export interface FocusSession {
   id: string; taskId: string | null; status: 'running' | 'paused' | 'stopped' | 'completed';
   durationMinutes: number; breakMinutes: number; startedAtMs: number; runStartedAtMs: number | null;
   elapsedMs: number; finishedAtMs: number | null;
+  /** Academic context, set when the session was started for a course, coursework or a study block. */
+  courseId: string | null; studyBlockId: string | null;
 }
+export interface FocusContext { courseId?: string | null; studyBlockId?: string | null }
 export interface RewardEvent { id: string; kind: string; sourceId: string; occurredAtMs: number; xp: number }
 export interface Progression {
   xp: number; level: number; earned: string[]; unlocked: string[]; styleId: 'classic' | 'berry';
@@ -80,12 +83,13 @@ export async function setFocusDefaults(duration: number, breakMinutes: number): 
   if (native()) return invoke('set_focus_defaults', { duration, breakMinutes });
   preview.focusDurationMinutes = duration; preview.breakDurationMinutes = breakMinutes;
 }
-export async function focusAction(action: 'start' | 'pause' | 'resume' | 'stop' | 'complete', id: string, taskId: string | null = null, duration = 0, breakMinutes = 0): Promise<void> {
-  if (native()) return invoke('focus_action', { action, id, taskId, duration, breakMinutes });
+export async function focusAction(action: 'start' | 'pause' | 'resume' | 'stop' | 'complete', id: string, taskId: string | null = null, duration = 0, breakMinutes = 0, context: FocusContext = {}): Promise<void> {
+  if (native()) return invoke('focus_action', { action, id, taskId, duration, breakMinutes, courseId: context.courseId ?? null, studyBlockId: context.studyBlockId ?? null });
   const now = Date.now();
-  if (action === 'start') { preview.sessions.unshift({ id, taskId, status: 'running', durationMinutes: duration, breakMinutes, startedAtMs: now, runStartedAtMs: now, elapsedMs: 0, finishedAtMs: null }); return; }
+  if (action === 'start') { preview.sessions.unshift({ id, taskId, status: 'running', durationMinutes: duration, breakMinutes, startedAtMs: now, runStartedAtMs: now, elapsedMs: 0, finishedAtMs: null, courseId: context.courseId ?? null, studyBlockId: context.studyBlockId ?? null }); return; }
   const s = preview.sessions.find(x => x.id === id);
   if (!s) throw new Error('Session unavailable');
+  if (action === 'complete' && s.status === 'completed') return; // idempotent, like the native command
   const elapsed = s.elapsedMs + (s.runStartedAtMs ? Math.max(0, now - s.runStartedAtMs) : 0);
   if (action === 'complete' && (s.status !== 'running' || elapsed < s.durationMinutes * 60_000)) throw new Error('Focus time has not finished');
   if (action === 'pause') { s.elapsedMs = elapsed; s.runStartedAtMs = null; s.status = 'paused'; }

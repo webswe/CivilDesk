@@ -147,3 +147,20 @@
 .calendar-chip.exam { background: #7a3f50; color: #ffeef1; }
 .calendar-chip.quiz { background: #6b5390; color: #f4ecff; }
 @media (max-width: 760px) { .semester-bar .bar-spacer { display: none; } .course-grid { grid-template-columns: 1fr; } }
+
+/* Phase 4B: study */
+.school-views { margin: 14px 0 4px; }
+.study-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0 4px; }
+.study-view .course-row .soft-button { white-space: nowrap; }
+.goal-list { list-style: none; margin: 0; padding: 0; }
+.goal-row { display: flex; align-items: center; gap: 12px; padding: 10px 6px; border-bottom: 1px solid #493a45; }
+.goal-name { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.goal-name small { color: #a995a0; font-size: 12px; }
+.goal-row progress { width: 140px; flex: none; }
+.course-study { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0 4px; font-size: 12.5px; color: #cbb4bf; }
+.course-study > span { flex: 1; min-width: 200px; }
+.study-glance { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 14px; }
+.study-glance .text-link { margin-top: 0; }
+.calendar-chip.study { background: #3f5e66; color: #e8f6f8; }
+.day-row.study .day-time { color: #9fd0d8; }
+@media (max-width: 760px) { .goal-row { flex-wrap: wrap; } .goal-row progress { width: 100%; order: 3; } }

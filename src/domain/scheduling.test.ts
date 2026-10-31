@@ -3,7 +3,7 @@ import { elapsedMs, localDate, remainingMs } from './scheduling';
 import type { FocusSession } from '../services/workspace';
 const session: FocusSession = {
   id: 'one', taskId: null, status: 'running', durationMinutes: 25, breakMinutes: 5,
-  startedAtMs: 1000, runStartedAtMs: 1000, elapsedMs: 60_000, finishedAtMs: null,
+  startedAtMs: 1000, runStartedAtMs: 1000, elapsedMs: 60_000, finishedAtMs: null, courseId: null, studyBlockId: null,
 };
 describe('focus timing and local dates', () => {
   it('derives remaining time from timestamps, not timer ticks', () => {

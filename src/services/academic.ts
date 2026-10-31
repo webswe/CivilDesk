@@ -21,6 +21,8 @@ export interface CourseworkInput { task: TaskInput; courseId: string; workType: 
 export interface AcademicData { semesters: Semester[]; courses: Course[]; work: CourseworkLink[] }
 
 const native = () => '__TAURI_INTERNALS__' in window;
+/** Browser-preview hook: lets the study store detach blocks when coursework changes course. */
+export const previewHooks: { coursework?: (taskId: string, courseId: string | null) => void } = {};
 const preview: AcademicData = { semesters: [], courses: [], work: [] };
 const clone = <T,>(x: T): T => structuredClone(x);
 const isDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s + 'T12:00:00')) && new Date(s + 'T12:00:00').toISOString().slice(0, 10) === s;
@@ -79,10 +81,12 @@ export async function saveCoursework(coursework: CourseworkInput): Promise<void>
   const existing = previewWorkspace().tasks.find(t => t.id === coursework.task.id);
   await saveTask({ ...coursework.task, category: existing ? existing.category : 'School' });
   preview.work = [...preview.work.filter(w => w.taskId !== coursework.task.id), { taskId: coursework.task.id, courseId: coursework.courseId, workType: coursework.workType, referenceNotes: coursework.referenceNotes }];
+  previewHooks.coursework?.(coursework.task.id, coursework.courseId);
 }
 export async function unlinkCoursework(taskId: string): Promise<void> {
   if (native()) return invoke('unlink_coursework', { taskId });
   preview.work = preview.work.filter(w => w.taskId !== taskId);
+  previewHooks.coursework?.(taskId, null);
 }
 /** Deleting a task removes only its academic link, mirroring ON DELETE CASCADE. */
 export async function deleteCourseworkTask(taskId: string): Promise<void> {
