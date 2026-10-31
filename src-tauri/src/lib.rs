@@ -1,9 +1,11 @@
 mod calendar;
+mod challenges;
 mod persistence;
 mod productivity;
 mod projects;
 
 use calendar::CalendarInput;
+use challenges::ChallengeSettings;
 use persistence::{AppSnapshot, Database};
 use productivity::{TaskInput, WorkspaceData};
 use projects::{FileReference, JournalEntry, Milestone, Project, ProjectsData};
@@ -195,9 +197,87 @@ fn save_journal_entry(
     state.database()?.save_journal(entry)
 }
 
+#[tauri::command]
+fn load_challenges(
+    state: tauri::State<'_, RuntimeState>,
+) -> Result<challenges::ChallengeData, String> {
+    state.database()?.challenges()
+}
+#[tauri::command]
+fn save_challenge_settings(
+    state: tauri::State<'_, RuntimeState>,
+    settings: ChallengeSettings,
+) -> Result<(), String> {
+    state.database()?.challenge_settings(settings)
+}
+#[tauri::command]
+fn assign_week(
+    state: tauri::State<'_, RuntimeState>,
+    week: String,
+    manual: Option<String>,
+) -> Result<(), String> {
+    state.database()?.assign_week(&week, manual.as_deref())
+}
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn challenge_action(
+    state: tauri::State<'_, RuntimeState>,
+    id: String,
+    action: String,
+    week: String,
+    mode: Option<String>,
+    notes: Option<String>,
+    deadline: Option<String>,
+    check: Option<i64>,
+) -> Result<(), String> {
+    state.database()?.challenge_action(
+        &id,
+        &action,
+        &week,
+        mode.as_deref(),
+        notes.as_deref(),
+        deadline.as_deref(),
+        check,
+    )
+}
+#[tauri::command]
+fn add_challenge_evidence(
+    state: tauri::State<'_, RuntimeState>,
+    id: String,
+    challenge_id: String,
+    path: String,
+) -> Result<(), String> {
+    state.database()?.add_evidence(&id, &challenge_id, &path)
+}
+#[tauri::command]
+fn remove_challenge_evidence(
+    state: tauri::State<'_, RuntimeState>,
+    id: String,
+) -> Result<(), String> {
+    state.database()?.remove_evidence(&id)
+}
+#[tauri::command]
+fn link_challenge_project(
+    state: tauri::State<'_, RuntimeState>,
+    challenge_id: String,
+    project_id: String,
+) -> Result<(), String> {
+    state
+        .database()?
+        .link_challenge_project(&challenge_id, &project_id)
+}
+#[tauri::command]
+fn create_challenge_project(
+    state: tauri::State<'_, RuntimeState>,
+    challenge_id: String,
+) -> Result<String, String> {
+    state.database()?.create_challenge_project(&challenge_id)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let result = app
                 .path()
@@ -245,7 +325,15 @@ pub fn run() {
             associate_task,
             save_project_file,
             open_project_file,
-            save_journal_entry
+            save_journal_entry,
+            load_challenges,
+            save_challenge_settings,
+            assign_week,
+            challenge_action,
+            add_challenge_evidence,
+            remove_challenge_evidence,
+            link_challenge_project,
+            create_challenge_project
         ])
         .run(tauri::generate_context!())
         .expect("CivilDesk could not start");

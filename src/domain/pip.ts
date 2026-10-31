@@ -1,6 +1,6 @@
 import type { Engagement, PipState } from './types';
 
-export type PipEvent = 'PET' | 'EXPLORE' | 'REST' | 'WAKE' | 'IDLE' | 'TASK_COMPLETED' | 'FOCUS_START' | 'FOCUS_END';
+export type PipEvent = 'PET' | 'EXPLORE' | 'REST' | 'WAKE' | 'IDLE' | 'TASK_COMPLETED' | 'ENGINEERING_ACCOMPLISHMENT' | 'FOCUS_START' | 'FOCUS_END';
 export interface PipContext { focusMode: boolean; engagement: Engagement; lastReactionAt: number; now: number }
 export interface PipTransition { state: PipState; lastReactionAt: number }
 
@@ -13,7 +13,7 @@ export function transitionPip(state: PipState, event: PipEvent, context: PipCont
   if (state === 'sleeping') return { state, lastReactionAt: context.lastReactionAt };
   if (event === 'PET') return { state: 'affectionate', lastReactionAt: context.now };
   if (event === 'EXPLORE') return { state: 'curious', lastReactionAt: context.now };
-  if (event === 'TASK_COMPLETED') {
+  if (event === 'TASK_COMPLETED' || event === 'ENGINEERING_ACCOMPLISHMENT') {
     if (context.engagement === 'quiet' || context.now - context.lastReactionAt < 60_000) return { state, lastReactionAt: context.lastReactionAt };
     return { state: 'celebrating', lastReactionAt: context.now };
   }

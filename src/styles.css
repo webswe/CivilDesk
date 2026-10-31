@@ -6,3 +6,33 @@
 .calendar-grid.day .calendar-weekdays{display:none}.calendar-grid.day .calendar-cells{grid-template-columns:1fr}.break-timer{color:#e5b8c2!important}
 .page-head .primary-button{white-space:nowrap;flex:none}
 .projects-panel{max-width:1200px}.project-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.project-card{background:#30262e;border:1px solid #604a55;border-radius:14px;padding:22px;min-width:0}.project-card-top,.progress-label{display:flex;justify-content:space-between;gap:12px;align-items:center}.project-card h2{font-family:Georgia,serif;font-weight:400;margin:15px 0 8px}.project-title{background:none;border:0;color:#f5eff0;padding:0;font:inherit;text-align:left}.project-title:hover,.project-title:focus-visible{color:#e5b8c2}.project-card p{font-size:12px;min-height:38px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.project-card small,.project-overview small{display:block;color:#b9a9b0;font-size:11px;margin:10px 0 18px}.status-pill{border-radius:20px;padding:5px 9px;background:#594353;color:#f5e8ed;font-size:10px;white-space:nowrap}.status-completed{background:#36594d}.status-on-hold{background:#665235}.status-archived{background:#46414a}.progress-label{font-size:11px;margin-top:20px}.progress-label strong{color:#e5b8c2}progress{width:100%;height:8px;accent-color:#c58d9b}.project-tabs{display:flex;gap:3px;overflow-x:auto;border-bottom:1px solid #604a55;margin:23px 0}.project-tabs button{border:0;border-bottom:2px solid transparent;background:transparent;color:#b9a9b0;white-space:nowrap;padding:11px 13px;font-size:12px}.project-tabs button.active{color:#f5eff0;border-color:#c58d9b}.project-overview{display:grid;grid-template-columns:1.3fr 1fr;gap:16px}.project-section{margin-top:24px}.project-section h2{font-family:Georgia,serif;font-size:23px;font-weight:400}.project-section .page-head p{font-size:12px}.project-section .toolbar select{max-width:400px}.journal-list{display:grid;gap:15px;margin-top:18px}.journal-list .info-card{min-height:0}.journal-list h3{margin:9px 0 0}.journal-list strong{font-size:11px;color:#e5b8c2}.journal-text{white-space:pre-wrap}.file-path{overflow-wrap:anywhere}.portfolio-field{border-bottom:1px solid #54414c;padding:18px 0}.portfolio-field h3{font-size:14px}.portfolio-field p{white-space:pre-wrap;font-size:12px}.portfolio-note{margin-top:20px;font-size:11px}.project-dialog .check-row{display:flex;flex-direction:row;justify-content:space-between;align-items:center}.project-dialog .check-row input{width:17px;min-height:17px;accent-color:#c58d9b}.project-dialog .subtask-row span{flex:1;font-size:12px}.calendar-chip.milestone{background:#4d614e;color:#ebf5e7}@media(max-width:850px){.project-grid,.project-overview{grid-template-columns:1fr}}
+.challenge-page { max-width: 1500px; }
+.challenge-tabs { margin: 22px 0; flex-wrap: wrap; }
+.challenge-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(245px,1fr)); gap: 14px; margin: 16px 0; }
+.challenge-card { display: flex; flex-direction: column; gap: 10px; text-align: left; padding: 19px; border: 1px solid #d9c7c5; border-radius: 15px; background: #fffaf8; color: #39272e; cursor: pointer; min-height: 155px; }
+.challenge-card:hover,.challenge-card:focus-visible { border-color: #9e6670; box-shadow: 0 3px 14px #6849501a; }
+.challenge-card strong { font-size: 1.08rem; }
+.challenge-card .eyebrow { color: #8d5060; }
+.challenge-card span:not(.eyebrow) { line-height: 1.45; }
+.challenge-card span:not(.eyebrow) { color: #5b4750; }
+.challenge-card small { margin-top: auto; color: #725e62; }
+.challenge-detail-grid { display: grid; grid-template-columns: minmax(0,1.7fr) minmax(285px,1fr); gap: 18px; align-items: start; }
+.challenge-main,.challenge-side { display: grid; gap: 16px; min-width: 0; }
+.challenge-main li { line-height: 1.65; margin-bottom: 9px; }
+.challenge-main .info-card,.challenge-side .info-card { margin: 0; }
+.challenge-side .info-card { display: grid; gap: 10px; }
+.challenge-side input:not([type=checkbox]),.challenge-side textarea,.challenge-side select { width: 100%; }
+.challenge-check { display: flex; align-items: flex-start; gap: 9px; line-height: 1.45; }
+.challenge-check input { flex: none; margin-top: 4px; }
+.challenge-file { display: flex; justify-content: space-between; gap: 8px; border-top: 1px solid #eadcda; padding-top: 9px; min-width: 0; }
+.challenge-file span,.challenge-file small { overflow-wrap: anywhere; }
+.challenge-file small { display: block; }
+.challenge-status { background: #f0e1e0; color: #653e46; padding: 8px 12px; border-radius: 999px; white-space: nowrap; }
+.challenge-page .check-row { display: inline-flex; flex-direction: row; align-items: center; gap: 9px; margin: 6px 15px 6px 0; font-size: 12px; }
+.challenge-page .check-row input { width: 16px; height: 16px; accent-color: #c58d9b; }
+.challenge-page input[type=number],.challenge-page select { background: #291f27; border: 1px solid #69515f; color: #f5eff0; border-radius: 8px; padding: 9px; min-height: 38px; }
+.challenge-page input[type=number] { width: 72px; margin-left: 10px; }
+.pathway-list li { margin: 12px 0; }
+.pathway-list small { display: block; }
+.dashboard-challenges { margin-top: 18px; }
+@media(max-width:900px) { .challenge-detail-grid { grid-template-columns: 1fr; } }

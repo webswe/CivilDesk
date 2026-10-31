@@ -76,6 +76,8 @@ impl Database {
             .pragma_update(None, "foreign_keys", "ON")
             .map_err(|e| e.to_string())?;
         migrate(&connection).map_err(|e| format!("Database migration failed: {e}"))?;
+        crate::challenges::seed(&connection)
+            .map_err(|e| format!("Challenge library could not load: {e}"))?;
         connection.execute("UPDATE focus_sessions SET status = 'paused', run_started_at_ms = NULL WHERE status = 'running'", [])
             .map_err(|e| format!("Could not recover interrupted focus sessions: {e}"))?;
         Ok(Self(Mutex::new(connection)))
@@ -149,13 +151,13 @@ impl Database {
     }
 }
 
-fn migrate(conn: &Connection) -> Result<(), String> {
+pub(crate) fn migrate(conn: &Connection) -> Result<(), String> {
     let version: u32 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|e| format!("Could not read database schema version: {e}"))?;
-    if version > 4 {
+    if version > 5 {
         return Err(format!(
-            "Database schema version {version} is newer than supported version 4"
+            "Database schema version {version} is newer than supported version 5"
         ));
     }
     if version == 0 {
@@ -250,6 +252,28 @@ fn migrate(conn: &Connection) -> Result<(), String> {
             PRAGMA user_version = 4; COMMIT;")
             .map_err(|e| e.to_string())?;
     }
+    if version < 5 {
+        conn.execute_batch("BEGIN IMMEDIATE;
+            CREATE TABLE challenge_definitions (id TEXT PRIMARY KEY, track TEXT NOT NULL, discipline TEXT NOT NULL, difficulty TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1);
+            CREATE TABLE challenge_versions (challenge_id TEXT NOT NULL REFERENCES challenge_definitions(id), version INTEGER NOT NULL, content_json TEXT NOT NULL, PRIMARY KEY(challenge_id,version));
+            CREATE TABLE learning_pathways (id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL, track TEXT NOT NULL);
+            CREATE TABLE pathway_challenges (pathway_id TEXT NOT NULL REFERENCES learning_pathways(id), challenge_id TEXT NOT NULL REFERENCES challenge_definitions(id), position INTEGER NOT NULL, PRIMARY KEY(pathway_id,challenge_id), UNIQUE(pathway_id,position));
+            CREATE TABLE challenge_prerequisites (challenge_id TEXT NOT NULL REFERENCES challenge_definitions(id), prerequisite_id TEXT NOT NULL REFERENCES challenge_definitions(id), PRIMARY KEY(challenge_id,prerequisite_id), CHECK(challenge_id<>prerequisite_id));
+            CREATE TABLE challenge_settings (id INTEGER PRIMARY KEY CHECK(id=1), automatic INTEGER NOT NULL DEFAULT 0, tracks_json TEXT NOT NULL DEFAULT '[\"AutoCAD\",\"Civil 3D\",\"Revit\"]', difficulties_json TEXT NOT NULL DEFAULT '[\"Beginner\",\"Intermediate\",\"Advanced\"]', weekly_count INTEGER NOT NULL DEFAULT 2 CHECK(weekly_count BETWEEN 1 AND 9));
+            INSERT INTO challenge_settings(id) VALUES (1);
+            CREATE TABLE weekly_challenges (id TEXT PRIMARY KEY, week_start TEXT NOT NULL, challenge_id TEXT NOT NULL REFERENCES challenge_definitions(id), content_version INTEGER NOT NULL, source TEXT NOT NULL CHECK(source IN ('automatic','manual')), status TEXT NOT NULL CHECK(status IN ('Not Started','In Progress','Completed','Skipped')), created_at_ms INTEGER NOT NULL, UNIQUE(week_start,challenge_id), FOREIGN KEY(challenge_id,content_version) REFERENCES challenge_versions(challenge_id,version));
+            CREATE INDEX weekly_challenges_week ON weekly_challenges(week_start);
+            CREATE TABLE challenge_progress (challenge_id TEXT PRIMARY KEY REFERENCES challenge_definitions(id), content_version INTEGER NOT NULL, mode TEXT NOT NULL CHECK(mode IN ('guided','brief')), status TEXT NOT NULL CHECK(status IN ('In Progress','Completed','Skipped')), notes TEXT NOT NULL DEFAULT '', deadline_date TEXT, started_at_ms INTEGER NOT NULL, completed_at_ms INTEGER, updated_at_ms INTEGER NOT NULL, FOREIGN KEY(challenge_id,content_version) REFERENCES challenge_versions(challenge_id,version));
+            CREATE TABLE challenge_checks (challenge_id TEXT NOT NULL REFERENCES challenge_definitions(id), content_version INTEGER NOT NULL, item_index INTEGER NOT NULL, checked INTEGER NOT NULL, PRIMARY KEY(challenge_id,content_version,item_index), FOREIGN KEY(challenge_id,content_version) REFERENCES challenge_versions(challenge_id,version));
+            CREATE TABLE challenge_evidence (id TEXT PRIMARY KEY, challenge_id TEXT NOT NULL REFERENCES challenge_definitions(id), display_name TEXT NOT NULL, path TEXT NOT NULL, category TEXT NOT NULL, added_at_ms INTEGER NOT NULL, UNIQUE(challenge_id,path));
+            CREATE TABLE engineering_skills (id TEXT PRIMARY KEY, title TEXT NOT NULL, track TEXT NOT NULL);
+            CREATE TABLE challenge_skills (challenge_id TEXT NOT NULL REFERENCES challenge_definitions(id), skill_id TEXT NOT NULL REFERENCES engineering_skills(id), PRIMARY KEY(challenge_id,skill_id));
+            CREATE TABLE challenge_projects (challenge_id TEXT NOT NULL REFERENCES challenge_definitions(id), project_id TEXT NOT NULL REFERENCES engineering_projects(id) ON DELETE CASCADE, created_at_ms INTEGER NOT NULL, created_from_challenge INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(challenge_id,project_id));
+            CREATE UNIQUE INDEX challenge_one_created_project ON challenge_projects(challenge_id) WHERE created_from_challenge=1;
+            CREATE TABLE engineering_events (kind TEXT NOT NULL, source_id TEXT NOT NULL, occurred_at_ms INTEGER NOT NULL, PRIMARY KEY(kind,source_id));
+            PRAGMA user_version = 5; COMMIT;")
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -312,7 +336,7 @@ mod tests {
                     .unwrap()
                     .pragma_query_value(None, "user_version", |row| row.get(0))
                     .unwrap();
-            assert_eq!(version, 4);
+            assert_eq!(version, 5);
         }
         std::fs::remove_file(path).unwrap();
     }
@@ -332,7 +356,7 @@ mod tests {
         let path = unique_test_path();
         {
             let connection = Connection::open(&path).unwrap();
-            connection.execute_batch("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO app_state VALUES ('marker', 'keep'); PRAGMA user_version = 5;").unwrap();
+            connection.execute_batch("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO app_state VALUES ('marker', 'keep'); PRAGMA user_version = 6;").unwrap();
         }
         assert!(Database::open(&path).is_err());
         let connection = Connection::open(&path).unwrap();
@@ -368,7 +392,7 @@ mod tests {
                 .unwrap()
                 .pragma_query_value(None, "user_version", |r| r.get(0))
                 .unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
         drop(db);
         std::fs::remove_file(path).unwrap();
     }
@@ -397,7 +421,7 @@ mod tests {
         let version: i64 = c
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
         drop(c);
         drop(db);
         std::fs::remove_file(path).unwrap();
