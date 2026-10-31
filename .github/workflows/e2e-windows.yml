@@ -1,0 +1,104 @@
+name: Native E2E (Windows)
+# Manual only. Drives the real CivilDesk desktop binary through tauri-driver + WebdriverIO.
+# The binary uses its own identity (com.webswe.civildesk.e2e) and never touches production or Acceptance data.
+# It is not a required gate until it has proven reliable.
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: 'smoke = launch/task/restart proof of concept only; full = every spec'
+        type: choice
+        default: smoke
+        options: [smoke, full]
+permissions:
+  contents: read
+concurrency:
+  group: e2e-windows-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  e2e:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            e2e/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix e2e
+      - name: Verify E2E isolation and harness unit tests
+        run: |
+          node scripts/check-e2e-config.mjs
+          npx vitest run e2e/lib
+      - name: Build the E2E application (debug, no installer, isolated identity)
+        run: npm run tauri build -- --debug --no-bundle --config src-tauri/tauri.e2e.conf.json
+      - name: Confirm the binary
+        shell: pwsh
+        run: |
+          $exe = 'src-tauri/target/debug/civildesk-e2e.exe'
+          if (-not (Test-Path $exe)) { throw "Expected $exe" }
+          Get-Item $exe | Format-List Name, Length
+      - name: Restore driver binaries
+        id: drivers
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/tauri-driver.exe
+            ~/.cargo/bin/msedgedriver-tool.exe
+          key: e2e-drivers-${{ runner.os }}-v1
+      - name: Install tauri-driver and msedgedriver-tool
+        if: steps.drivers.outputs.cache-hit != 'true'
+        run: |
+          cargo install tauri-driver --locked
+          cargo install --git https://github.com/chippers/msedgedriver-tool
+      - name: Show WebView2 runtime version
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          if (-not (Test-Path $key)) { throw 'WebView2 Runtime is not installed on this runner.' }
+          "WebView2 Runtime: $((Get-ItemProperty $key).pv)"
+      - name: Download matching msedgedriver
+        shell: pwsh
+        run: |
+          & "$HOME/.cargo/bin/msedgedriver-tool.exe"
+          $PWD.Path | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          Get-ChildItem msedgedriver.exe | Format-List Name, Length
+      - name: Run acceptance tests
+        working-directory: e2e
+        run: |
+          if ('${{ inputs.suite }}' -eq 'full') { npm test } else { npm run test:smoke }
+      - name: Verify SQLite health and results
+        if: always()
+        working-directory: e2e
+        shell: pwsh
+        run: npm run verify 2>&1 | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+      - name: Capture desktop screenshot on failure
+        if: failure()
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          New-Item -ItemType Directory -Force e2e/results | Out-Null
+          $bmp.Save('e2e/results/desktop-on-failure.png')
+      - name: Upload results (screenshots, logs, JUnit)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: civildesk-e2e-results
+          path: e2e/results
+          if-no-files-found: warn
+          retention-days: 14
