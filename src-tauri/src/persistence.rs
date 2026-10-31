@@ -58,7 +58,7 @@ pub struct AppSnapshot {
     pub companion: CompanionRecord,
 }
 
-pub struct Database(Mutex<Connection>);
+pub struct Database(pub(crate) Mutex<Connection>);
 
 impl Database {
     pub fn open(path: &Path) -> Result<Self, String> {
@@ -76,6 +76,8 @@ impl Database {
             .pragma_update(None, "foreign_keys", "ON")
             .map_err(|e| e.to_string())?;
         migrate(&connection).map_err(|e| format!("Database migration failed: {e}"))?;
+        connection.execute("UPDATE focus_sessions SET status = 'paused', run_started_at_ms = NULL WHERE status = 'running'", [])
+            .map_err(|e| format!("Could not recover interrupted focus sessions: {e}"))?;
         Ok(Self(Mutex::new(connection)))
     }
 
@@ -151,9 +153,9 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     let version: u32 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|e| format!("Could not read database schema version: {e}"))?;
-    if version > 1 {
+    if version > 2 {
         return Err(format!(
-            "Database schema version {version} is newer than supported version 1"
+            "Database schema version {version} is newer than supported version 2"
         ));
     }
     if version == 0 {
@@ -163,6 +165,31 @@ fn migrate(conn: &Connection) -> Result<(), String> {
             CREATE TABLE earned_achievements (definition_id TEXT NOT NULL, rule_version INTEGER NOT NULL, event_id TEXT NOT NULL REFERENCES reward_events(id), earned_at TEXT NOT NULL, PRIMARY KEY(definition_id, rule_version));
             CREATE TABLE cosmetic_unlocks (cosmetic_id TEXT PRIMARY KEY NOT NULL, source_event_id TEXT NOT NULL REFERENCES reward_events(id), unlocked_at TEXT NOT NULL);
             PRAGMA user_version = 1; COMMIT;")
+            .map_err(|e| e.to_string())?;
+    }
+    if version < 2 {
+        conn.execute_batch("BEGIN IMMEDIATE;
+            CREATE TABLE tasks (
+                id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+                category TEXT NOT NULL DEFAULT '', priority TEXT NOT NULL DEFAULT 'normal',
+                due_date TEXT, due_time TEXT, subtasks_json TEXT NOT NULL DEFAULT '[]',
+                reminder_offset_minutes INTEGER, created_at_ms INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL,
+                completed_at_ms INTEGER, first_completed_at_ms INTEGER
+            );
+            CREATE INDEX tasks_due ON tasks(due_date, due_time);
+            CREATE TABLE focus_sessions (
+                id TEXT PRIMARY KEY NOT NULL, task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+                status TEXT NOT NULL, duration_minutes INTEGER NOT NULL, break_minutes INTEGER NOT NULL,
+                started_at_ms INTEGER NOT NULL, run_started_at_ms INTEGER, elapsed_ms INTEGER NOT NULL DEFAULT 0,
+                finished_at_ms INTEGER
+            );
+            CREATE UNIQUE INDEX one_active_focus ON focus_sessions((1)) WHERE status IN ('running', 'paused');
+            CREATE TABLE focus_defaults (id INTEGER PRIMARY KEY CHECK(id = 1), duration_minutes INTEGER NOT NULL, break_minutes INTEGER NOT NULL);
+            INSERT INTO focus_defaults VALUES (1, 25, 5);
+            CREATE TABLE pip_customization (id INTEGER PRIMARY KEY CHECK(id = 1), style_id TEXT NOT NULL, scarf INTEGER NOT NULL, headphones INTEGER NOT NULL);
+            INSERT INTO pip_customization VALUES (1, 'classic', 0, 0);
+            ALTER TABLE reward_events ADD COLUMN xp INTEGER NOT NULL DEFAULT 0;
+            PRAGMA user_version = 2; COMMIT;")
             .map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -227,7 +254,7 @@ mod tests {
                     .unwrap()
                     .pragma_query_value(None, "user_version", |row| row.get(0))
                     .unwrap();
-            assert_eq!(version, 1);
+            assert_eq!(version, 2);
         }
         std::fs::remove_file(path).unwrap();
     }
@@ -247,7 +274,7 @@ mod tests {
         let path = unique_test_path();
         {
             let connection = Connection::open(&path).unwrap();
-            connection.execute_batch("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO app_state VALUES ('marker', 'keep'); PRAGMA user_version = 2;").unwrap();
+            connection.execute_batch("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO app_state VALUES ('marker', 'keep'); PRAGMA user_version = 3;").unwrap();
         }
         assert!(Database::open(&path).is_err());
         let connection = Connection::open(&path).unwrap();
@@ -260,6 +287,31 @@ mod tests {
             .unwrap();
         assert_eq!(marker, "keep");
         drop(connection);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn phase_one_database_migrates_without_losing_preferences() {
+        let path = unique_test_path();
+        {
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch("CREATE TABLE app_state (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
+                CREATE TABLE reward_events (id TEXT PRIMARY KEY NOT NULL, kind TEXT NOT NULL, source_id TEXT NOT NULL, occurred_at TEXT NOT NULL, UNIQUE(kind, source_id));
+                CREATE TABLE earned_achievements (definition_id TEXT NOT NULL, rule_version INTEGER NOT NULL, event_id TEXT NOT NULL REFERENCES reward_events(id), earned_at TEXT NOT NULL, PRIMARY KEY(definition_id, rule_version));
+                CREATE TABLE cosmetic_unlocks (cosmetic_id TEXT PRIMARY KEY NOT NULL, source_event_id TEXT NOT NULL REFERENCES reward_events(id), unlocked_at TEXT NOT NULL);
+                INSERT INTO app_state VALUES ('preferences', '{\"displayName\":\"Alex\",\"onboardingComplete\":true,\"pipVisible\":true,\"engagement\":\"balanced\",\"reducedMotion\":false,\"focusMode\":false,\"sidebarCollapsed\":false,\"dashboardPipEnabled\":true}');
+                PRAGMA user_version = 1;").unwrap();
+        }
+        let db = Database::open(&path).unwrap();
+        assert_eq!(db.load().unwrap().preferences.display_name, "Alex");
+        assert_eq!(db.workspace().unwrap().tasks.len(), 0);
+        let version: i64 =
+            db.0.lock()
+                .unwrap()
+                .pragma_query_value(None, "user_version", |r| r.get(0))
+                .unwrap();
+        assert_eq!(version, 2);
+        drop(db);
         std::fs::remove_file(path).unwrap();
     }
 }
