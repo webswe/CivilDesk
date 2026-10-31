@@ -23,7 +23,7 @@ e2e/
   lib/guard.mjs                     the only code that deletes anything (see section 3)
   lib/app.mjs                       selectors and helpers: role/label/text based, no coordinates
   lib/db.mjs                        read-only SQLite inspection, expected schema version from persistence.rs
-  specs/01..06-*.e2e.mjs            acceptance specs
+  specs/01..07-*.e2e.mjs            acceptance specs
   scripts/verify-results.mjs        final gate: SQLite health + JUnit failures
 scripts/check-e2e-config.mjs        isolation checks (also run in normal CI)
 ```
