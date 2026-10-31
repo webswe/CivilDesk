@@ -29,6 +29,14 @@ export function assertDisposable(target, env = process.env) {
   return resolved;
 }
 
+/** The only database file the harness may open: exactly <APPDATA>/com.webswe.civildesk.e2e/civildesk.sqlite3. */
+export function assertE2eDatabase(file, env = process.env) {
+  const resolved = path.win32.resolve(file);
+  const expected = path.win32.resolve(e2eDataPaths(env).database);
+  if (resolved.toLowerCase() !== expected.toLowerCase()) throw new Error(`Refusing to open "${resolved}": only the E2E database "${expected}" may be inspected.`);
+  return resolved;
+}
+
 /** Wipes only the E2E identity's folders. Allowed on CI runners, or locally with an explicit opt-in. */
 export function resetE2eData(env = process.env) {
   if (env.CI !== 'true' && env.CIVILDESK_E2E_ALLOW_RESET !== '1') {

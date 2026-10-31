@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { e2eDataPaths, resetE2eData } from './lib/guard.mjs';
 import { expectedSchemaVersion, inspectDatabase } from './lib/db.mjs';
+import { waitForAppExit } from './lib/process.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -71,14 +72,19 @@ export const config = {
   // Every spec file starts from an empty E2E profile (this only ever deletes the E2E identity folders).
   onWorkerStart: fatal(() => { resetE2eData(); }),
 
-  // After the session closes the app exits; record SQLite health for the final verification step.
+  // After the session closes: confirm the application really stopped, then take a consistent SQLite snapshot.
+  // A timeout or a database error is recorded as a failure; nothing is ever inspected while the app may still run.
   async afterSession(_config, _caps, specs) {
-    const database = e2eDataPaths().database;
-    let info = { exists: false };
-    for (let i = 0; i < 20; i++) {
-      try { info = inspectDatabase(database); break; } catch (error) { info = { exists: true, error: String(error) }; await new Promise(r => setTimeout(r, 500)); }
+    const record = { spec: path.basename(specs[0] ?? ''), expectedVersion: expectedSchemaVersion() };
+    const exit = await waitForAppExit({ binaryPath: binary, timeoutMs: 20000 });
+    record.shutdownWaitedMs = exit.waitedMs;
+    if (!exit.exited) {
+      Object.assign(record, { exists: true, appStillRunning: true, pids: exit.remaining.map(p => p.pid) });
+    } else {
+      try { Object.assign(record, await inspectDatabase(e2eDataPaths().database)); }
+      catch (error) { Object.assign(record, { exists: true, error: String(error) }); }
     }
-    fs.appendFileSync(path.join(results, 'db-checks.jsonl'), JSON.stringify({ spec: path.basename(specs[0] ?? ''), expectedVersion: expectedSchemaVersion(), ...info }) + '\n');
+    fs.appendFileSync(path.join(results, 'db-checks.jsonl'), JSON.stringify(record) + '\n');
   },
 
   async afterTest(test, _context, { passed }) {

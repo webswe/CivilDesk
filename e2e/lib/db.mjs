@@ -1,9 +1,17 @@
-// Read-only inspection of the E2E SQLite file after the application has exited.
+// Inspection of the disposable E2E SQLite database after the application has exited.
+//
+// The application uses SQLite's default rollback journal, so a process that is killed mid-transaction can leave a
+// hot journal behind. Reading such a file correctly needs a connection that may roll it back. Therefore this module:
+//   1. refuses any path that is not exactly the E2E database (never production or Acceptance),
+//   2. opens that disposable file read-write so SQLite can recover it,
+//   3. uses SQLite's Online Backup API to write a consistent snapshot into a private temp folder,
+//   4. runs every check against the snapshot, and always removes only the folder it created.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, backup } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
+import { assertE2eDatabase } from './guard.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 /** The schema version the Rust code migrates to: the highest `PRAGMA user_version = N` in persistence.rs. */
@@ -13,17 +21,32 @@ export function expectedSchemaVersion() {
   if (!versions.length) throw new Error('Could not determine the expected schema version.');
   return Math.max(...versions);
 }
-export function inspectDatabase(file) {
-  if (!fs.existsSync(file)) return { exists: false };
-  // Inspect a private copy (with any -wal/-shm sidecars) so SQLite can recover the log without ever writing
-  // to the application's own files; opening a WAL database read-only in place fails if the app was killed.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'civildesk-e2e-db-'));
-  const copy = path.join(dir, 'copy.sqlite3');
-  for (const suffix of ['', '-wal', '-shm']) if (fs.existsSync(file + suffix)) fs.copyFileSync(file + suffix, copy + suffix);
-  const db = new DatabaseSync(copy);
+
+/**
+ * @returns {Promise<{exists:false}|{exists:true,userVersion:number,integrity:string,tables:string[],rows:Record<string,number>}>}
+ * Throws with the real SQLite error if the database cannot be opened, snapshotted or inspected.
+ */
+export async function inspectDatabase(file, env = process.env) {
+  const database = assertE2eDatabase(file, env);
+  if (!fs.existsSync(database)) return { exists: false };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'civildesk-e2e-snapshot-'));
+  const snapshotPath = path.join(dir, 'snapshot.sqlite3');
+  let source;
+  let snapshot;
   try {
-    const one = sql => Object.values(db.prepare(sql).get() ?? {})[0];
-    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map(r => r.name);
-    return { exists: true, userVersion: Number(one('PRAGMA user_version')), integrity: String(one('PRAGMA quick_check')), tables };
-  } finally { db.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+    source = new DatabaseSync(database); // read-write on purpose: allows rollback-journal recovery of the disposable file
+    source.exec('PRAGMA busy_timeout = 2000');
+    await backup(source, snapshotPath);
+    source.close();
+    source = undefined;
+    snapshot = new DatabaseSync(snapshotPath);
+    const one = sql => Object.values(snapshot.prepare(sql).get() ?? {})[0];
+    const tables = snapshot.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map(r => String(r.name));
+    const rows = Object.fromEntries(tables.map(name => [name, Number(one(`SELECT COUNT(*) FROM "${name.replaceAll('"', '""')}"`))]));
+    return { exists: true, userVersion: Number(one('PRAGMA user_version')), integrity: String(one('PRAGMA quick_check')), tables, rows };
+  } finally {
+    try { source?.close(); } catch { /* already closed */ }
+    try { snapshot?.close(); } catch { /* already closed */ }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }

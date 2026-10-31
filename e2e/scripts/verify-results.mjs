@@ -7,7 +7,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-const results = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'results');
+const results = process.env.E2E_RESULTS_DIR ? path.resolve(process.env.E2E_RESULTS_DIR) : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'results');
 const failures = [];
 const note = message => { failures.push(message); console.error('FAIL: ' + message); };
 
@@ -16,7 +16,8 @@ assert.ok(fs.existsSync(checksFile), 'No SQLite checks were recorded; the applic
 const records = fs.readFileSync(checksFile, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line));
 assert.ok(records.length > 0, 'No SQLite checks were recorded.');
 for (const r of records) {
-  if (!r.exists) note(`${r.spec}: no database file was created`);
+  if (r.appStillRunning) note(`${r.spec}: the application was still running after the shutdown timeout (pid ${r.pids?.join(', ')}); the database was not inspected`);
+  else if (!r.exists) note(`${r.spec}: no database file was created`);
   else if (r.error) note(`${r.spec}: database could not be inspected: ${r.error}`);
   else {
     if (r.integrity !== 'ok') note(`${r.spec}: SQLite quick_check returned "${r.integrity}"`);
