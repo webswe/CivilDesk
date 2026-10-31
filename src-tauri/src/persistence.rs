@@ -464,7 +464,7 @@ mod tests {
             let c = Connection::open(&path).unwrap();
             c.execute_batch("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL,title TEXT NOT NULL,description TEXT NOT NULL,category TEXT NOT NULL,priority TEXT NOT NULL,due_date TEXT,due_time TEXT,subtasks_json TEXT NOT NULL,reminder_offset_minutes INTEGER,created_at_ms INTEGER NOT NULL,updated_at_ms INTEGER NOT NULL,completed_at_ms INTEGER,first_completed_at_ms INTEGER);
                 INSERT INTO tasks VALUES ('existing','Original task','','','normal',NULL,NULL,'[]',NULL,1,1,NULL,NULL);
-                CREATE TABLE focus_sessions (id TEXT PRIMARY KEY,status TEXT NOT NULL,run_started_at_ms INTEGER);
+                CREATE TABLE focus_sessions (id TEXT PRIMARY KEY NOT NULL, task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL, status TEXT NOT NULL, duration_minutes INTEGER NOT NULL, break_minutes INTEGER NOT NULL, started_at_ms INTEGER NOT NULL, run_started_at_ms INTEGER, elapsed_ms INTEGER NOT NULL DEFAULT 0, finished_at_ms INTEGER);
                 PRAGMA user_version = 3;").unwrap();
         }
         let db = Database::open(&path).unwrap();
