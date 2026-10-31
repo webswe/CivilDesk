@@ -12,6 +12,8 @@ import { NotificationsPage } from './NotificationsPage';
 import { claimReminder, deleteEvent, inQuietHours, reminderCandidates, saveEvent, saveReminderPreferences } from './services/calendar';
 import { PipIllustration } from './components/PipIllustration';
 import { Button } from './components/ui/button';
+import { ProjectsPage } from './ProjectsPage';
+import { associateTask, deleteProjectItem, loadProjects, openProjectFile, saveJournalEntry, saveMilestone, saveProject, saveProjectFile, setMilestoneCompleted, type ProjectsData } from './services/projects';
 
 type Destination = { label: string; icon: LucideIcon };
 const groups: { name: string; items: Destination[] }[] = [
@@ -49,11 +51,12 @@ function Settings({ snapshot, update }: { snapshot: AppSnapshot; update: (next: 
 export default function App() {
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceData | null>(null);
+  const [projects, setProjects] = useState<ProjectsData | null>(null);
   const [page, setPage] = useState('Dashboard');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [reminderAlert, setReminderAlert] = useState('');
-  useEffect(() => { Promise.all([loadSnapshot(), loadWorkspace()]).then(([s, w]) => { setSnapshot(s); setWorkspace(w); }).catch(e => setError(String(e))); }, []);
+  useEffect(() => { Promise.all([loadSnapshot(), loadWorkspace(), loadProjects()]).then(([s, w, p]) => { setSnapshot(s); setWorkspace(w); setProjects(p); }).catch(e => setError(String(e))); }, []);
   useEffect(() => { document.documentElement.classList.toggle('reduced-motion', !!snapshot?.preferences.reducedMotion); }, [snapshot?.preferences.reducedMotion]);
   useEffect(() => {
     if (!workspace || !workspace.reminderPreferences.enabled) return;
@@ -77,7 +80,7 @@ export default function App() {
   async function update(next: AppSnapshot) { setSnapshot(next); setSaving(true); try { await saveSnapshot(next); setError(''); } catch (e) { setError('Could not save your changes: ' + String(e)); } finally { setSaving(false); } }
   async function mutate(operation: () => Promise<void>): Promise<boolean> {
     setSaving(true);
-    try { await operation(); setWorkspace(await loadWorkspace()); setError(''); return true; }
+    try { await operation(); const [w,p] = await Promise.all([loadWorkspace(),loadProjects()]); setWorkspace(w); setProjects(p); setError(''); return true; }
     catch (e) { setError('Could not save your changes: ' + String(e)); return false; }
     finally { setSaving(false); }
   }
@@ -102,20 +105,21 @@ export default function App() {
     }
   }
   if (error && !snapshot) return <div className="fatal"><h1>CivilDesk could not open</h1><p>{error}</p><button onClick={() => window.location.reload()}>Try again</button></div>;
-  if (!snapshot || !workspace) return <div className="loading">Opening CivilDesk…</div>;
+  if (!snapshot || !workspace || !projects) return <div className="loading">Opening CivilDesk…</div>;
   if (!snapshot.preferences.onboardingComplete) return <>{error && <div role="alert" className="error-banner">{error}</div>}<Onboarding onDone={(name, visible, engagement) => void update({ ...snapshot, preferences: { ...snapshot.preferences, displayName: name, pipVisible: visible, engagement, onboardingComplete: true } })}/></>;
   const collapsed = snapshot.preferences.sidebarCollapsed;
   return <div className="shell"><aside className={'sidebar ' + (collapsed ? 'collapsed' : '')}><div className="sidebar-top"><div className="brand"><span className="brand-mark small">C</span><span className="brand-name">CivilDesk<small>YOUR WORKSPACE</small></span></div><button className="icon-button collapse-button" aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} onClick={() => void update({ ...snapshot, preferences: { ...snapshot.preferences, sidebarCollapsed: !collapsed } })}>{collapsed ? <Menu size={18}/> : <ChevronLeft size={18}/>}</button></div><nav aria-label="Main navigation">{groups.map(group => <div className="nav-group" key={group.name}><div className="nav-heading">{group.name}</div>{group.items.map(item => <button title={item.label} key={item.label} className={'nav-item ' + (page === item.label ? 'active' : '')} aria-current={page === item.label ? 'page' : undefined} onClick={() => setPage(item.label)}><item.icon size={17} strokeWidth={1.8}/><span>{item.label}</span></button>)}</div>)}</nav><div className="sidebar-bottom"><span className="avatar">{snapshot.preferences.displayName.charAt(0).toUpperCase() || 'C'}</span><span className="account-name">{snapshot.preferences.displayName}<small>Local workspace</small></span></div></aside><main className="main"><header className="topbar"><div className="breadcrumb">CivilDesk <ChevronRight size={14}/> <strong>{page}</strong></div><div className="top-actions">{saving && <span className="save-status">Saving…</span>}<span className="local-badge">LOCAL FIRST</span><button className="icon-button" aria-label="Open settings" onClick={() => setPage('Settings')}><Settings2 size={18}/></button></div></header>{error && <div role="alert" className="error-banner">{error}</div>}{reminderAlert && <div className="reminder-banner" role="status"><span>{reminderAlert}</span><button aria-label="Dismiss reminder" onClick={() => setReminderAlert('')}>Dismiss</button></div>}<div className="content">
     {page === 'Dashboard' ? <Dashboard snapshot={snapshot} data={workspace} onPip={pip} onHide={() => void update({ ...snapshot, preferences: { ...snapshot.preferences, pipVisible: false } })} goTo={setPage}/>
-      : page === 'Calendar' ? <CalendarPage data={workspace} save={async event => mutate(() => saveEvent(event))} remove={async id => { await mutate(() => deleteEvent(id)); }}/>
+      : page === 'Calendar' ? <CalendarPage data={workspace} projects={projects} save={async event => mutate(() => saveEvent(event))} remove={async id => { await mutate(() => deleteEvent(id)); }}/>
       : page === 'Notifications' ? <NotificationsPage data={workspace} save={async prefs => { await mutate(() => saveReminderPreferences(prefs)); }}/>
       : page === 'Tasks' ? <TasksPage data={workspace} save={async (task: TaskInput) => mutate(() => saveTask(task))} remove={async id => { await mutate(() => deleteTask(id)); }} complete={completeTask}/>
+      : page === 'Projects' || page === 'Engineering Journal' ? <ProjectsPage data={projects} workspace={workspace} saveProject={p=>mutate(()=>saveProject(p))} saveMilestone={m=>mutate(()=>saveMilestone(m))} completeMilestone={async(id,value)=>{await mutate(()=>setMilestoneCompleted(id,value))}} deleteItem={async(kind,id)=>{await mutate(()=>deleteProjectItem(kind,id))}} associateTask={async(taskId,projectId)=>{await mutate(()=>associateTask(taskId,projectId))}} saveTask={t=>mutate(()=>saveTask(t))} completeTask={completeTask} saveFile={f=>mutate(()=>saveProjectFile(f))} openFile={async id=>{try{await openProjectFile(id)}catch(e){setError(String(e))}}} saveJournal={j=>mutate(()=>saveJournalEntry(j))}/>
       : page === 'Focus Sessions' ? <FocusPage data={workspace} defaults={async (d, b) => mutate(() => setFocusDefaults(d, b))} action={actFocus}/>
       : page === 'Settings' ? <Settings snapshot={snapshot} update={next => void update(next)}/>
       : page === 'Pip' ? <div className="page-panel"><span className="eyebrow">COMPANION</span><h1>Pip</h1><p>A gentle presence for your workday. Pip follows your pace.</p>{snapshot.preferences.pipVisible ? <div className="pip-page"><PipCard snapshot={snapshot} data={workspace} onPip={pip} onHide={() => void update({ ...snapshot, preferences: { ...snapshot.preferences, pipVisible: false } })}/></div> : <button className="primary-button" onClick={() => void update({ ...snapshot, preferences: { ...snapshot.preferences, pipVisible: true } })}>Show Pip</button>}</div>
       : page === 'Customization' ? <CustomizationPage data={workspace} state={snapshot.companion.state} reducedMotion={snapshot.preferences.reducedMotion} equip={async (id, equipped) => { await mutate(() => equipCosmetic(id, equipped)); }}/>
       : page === 'Achievements' ? <AchievementsPage data={workspace}/>
-      : page === 'About and Updates' ? <div className="page-panel"><span className="eyebrow">CIVILDESK</span><h1>About CivilDesk</h1><p>A local-first workspace for engineering work and personal progress.</p><div className="roadmap"><h2>What works today</h2><p>Onboarding, tasks, focus sessions, Pip progression, and preferences.</p><h2>What comes next</h2><p>Calendar, engineering projects, weekly challenges, academics, and portfolio arrive in later milestones.</p></div></div>
+      : page === 'About and Updates' ? <div className="page-panel"><span className="eyebrow">CIVILDESK</span><h1>About CivilDesk</h1><p>A local-first workspace for engineering work and personal progress.</p><div className="roadmap"><h2>What works today</h2><p>Onboarding, tasks, calendar, engineering projects, focus sessions, Pip progression, and preferences.</p><h2>What comes next</h2><p>Weekly challenges, academics, and Portfolio Studio arrive in later milestones.</p></div></div>
       : <div className="page-panel placeholder"><span className="eyebrow">COMING IN A FUTURE MILESTONE</span><h1>{page}</h1><p>This area is part of the CivilDesk roadmap. It does not store or manage data yet.</p><button className="soft-button" onClick={() => setPage('Dashboard')}>Back to dashboard <ChevronRight size={16}/></button></div>}
   </div></main></div>;
 }

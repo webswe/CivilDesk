@@ -6,6 +6,7 @@ export interface Task {
   id: string; title: string; description: string; category: string; priority: 'low' | 'normal' | 'high';
   dueDate: string | null; dueTime: string | null; subtasks: Subtask[]; reminderOffsetMinutes: number | null;
   createdAtMs: number; updatedAtMs: number; completedAtMs: number | null; firstCompletedAtMs: number | null;
+  projectId: string | null;
 }
 export type TaskInput = Pick<Task, 'id' | 'title' | 'description' | 'category' | 'priority' | 'dueDate' | 'dueTime' | 'subtasks' | 'reminderOffsetMinutes'>;
 export interface FocusSession {
@@ -50,7 +51,7 @@ export async function saveTask(task: TaskInput): Promise<void> {
   if (native()) return invoke('save_task', { task });
   const now = Date.now();
   const old = preview.tasks.find(t => t.id === task.id);
-  preview.tasks = [{ ...task, createdAtMs: old?.createdAtMs ?? now, updatedAtMs: now, completedAtMs: old?.completedAtMs ?? null, firstCompletedAtMs: old?.firstCompletedAtMs ?? null }, ...preview.tasks.filter(t => t.id !== task.id)];
+  preview.tasks = [{ ...task, createdAtMs: old?.createdAtMs ?? now, updatedAtMs: now, completedAtMs: old?.completedAtMs ?? null, firstCompletedAtMs: old?.firstCompletedAtMs ?? null, projectId: old?.projectId ?? null }, ...preview.tasks.filter(t => t.id !== task.id)];
 }
 export async function deleteTask(id: string): Promise<void> {
   if (native()) return invoke('delete_task', { id });

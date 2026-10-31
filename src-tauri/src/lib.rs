@@ -1,10 +1,12 @@
 mod calendar;
 mod persistence;
 mod productivity;
+mod projects;
 
 use calendar::CalendarInput;
 use persistence::{AppSnapshot, Database};
 use productivity::{TaskInput, WorkspaceData};
+use projects::{FileReference, JournalEntry, Milestone, Project, ProjectsData};
 use tauri::Manager;
 
 struct RuntimeState {
@@ -133,6 +135,66 @@ fn claim_reminder(
         .claim_reminder(&kind, &id, scheduled_at_ms)
 }
 
+#[tauri::command]
+fn load_projects(state: tauri::State<'_, RuntimeState>) -> Result<ProjectsData, String> {
+    state.database()?.projects()
+}
+#[tauri::command]
+fn save_project(state: tauri::State<'_, RuntimeState>, project: Project) -> Result<(), String> {
+    state.database()?.save_project(project)
+}
+#[tauri::command]
+fn save_milestone(
+    state: tauri::State<'_, RuntimeState>,
+    milestone: Milestone,
+) -> Result<(), String> {
+    state.database()?.save_milestone(milestone)
+}
+#[tauri::command]
+fn set_milestone_completed(
+    state: tauri::State<'_, RuntimeState>,
+    id: String,
+    completed: bool,
+) -> Result<(), String> {
+    state.database()?.set_milestone_completed(&id, completed)
+}
+#[tauri::command]
+fn delete_project_item(
+    state: tauri::State<'_, RuntimeState>,
+    kind: String,
+    id: String,
+) -> Result<(), String> {
+    state.database()?.delete_project_item(&kind, &id)
+}
+#[tauri::command]
+fn associate_task(
+    state: tauri::State<'_, RuntimeState>,
+    task_id: String,
+    project_id: Option<String>,
+) -> Result<(), String> {
+    state
+        .database()?
+        .associate_task(&task_id, project_id.as_deref())
+}
+#[tauri::command]
+fn save_project_file(
+    state: tauri::State<'_, RuntimeState>,
+    file: FileReference,
+) -> Result<(), String> {
+    state.database()?.save_file(file)
+}
+#[tauri::command]
+fn open_project_file(state: tauri::State<'_, RuntimeState>, id: String) -> Result<(), String> {
+    state.database()?.open_file(&id)
+}
+#[tauri::command]
+fn save_journal_entry(
+    state: tauri::State<'_, RuntimeState>,
+    entry: JournalEntry,
+) -> Result<(), String> {
+    state.database()?.save_journal(entry)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -174,7 +236,16 @@ pub fn run() {
             save_event,
             delete_event,
             save_reminder_preferences,
-            claim_reminder
+            claim_reminder,
+            load_projects,
+            save_project,
+            save_milestone,
+            set_milestone_completed,
+            delete_project_item,
+            associate_task,
+            save_project_file,
+            open_project_file,
+            save_journal_entry
         ])
         .run(tauri::generate_context!())
         .expect("CivilDesk could not start");

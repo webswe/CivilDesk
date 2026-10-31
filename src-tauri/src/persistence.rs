@@ -153,9 +153,9 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     let version: u32 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|e| format!("Could not read database schema version: {e}"))?;
-    if version > 3 {
+    if version > 4 {
         return Err(format!(
-            "Database schema version {version} is newer than supported version 3"
+            "Database schema version {version} is newer than supported version 4"
         ));
     }
     if version == 0 {
@@ -212,6 +212,42 @@ fn migrate(conn: &Connection) -> Result<(), String> {
                 delivered_at_ms INTEGER NOT NULL, PRIMARY KEY(source_kind,source_id,scheduled_at_ms)
             );
             PRAGMA user_version = 3; COMMIT;")
+            .map_err(|e| e.to_string())?;
+    }
+    if version < 4 {
+        conn.execute_batch("BEGIN IMMEDIATE;
+            CREATE TABLE engineering_projects (
+                id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL,
+                discipline TEXT NOT NULL, category TEXT NOT NULL, project_type TEXT NOT NULL,
+                software_json TEXT NOT NULL DEFAULT '[]', start_date TEXT, target_date TEXT,
+                status TEXT NOT NULL CHECK(status IN ('Planning','In Progress','On Hold','Completed','Archived')),
+                priority TEXT, created_at_ms INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL,
+                completed_at_ms INTEGER, portfolio_candidate INTEGER NOT NULL DEFAULT 0,
+                portfolio_summary TEXT NOT NULL DEFAULT '', objectives TEXT NOT NULL DEFAULT '',
+                contributions TEXT NOT NULL DEFAULT '', skills TEXT NOT NULL DEFAULT '',
+                decisions TEXT NOT NULL DEFAULT '', lessons TEXT NOT NULL DEFAULT ''
+            );
+            ALTER TABLE tasks ADD COLUMN project_id TEXT REFERENCES engineering_projects(id) ON DELETE SET NULL;
+            CREATE INDEX tasks_project ON tasks(project_id);
+            CREATE TABLE project_milestones (
+                id TEXT PRIMARY KEY NOT NULL, project_id TEXT NOT NULL REFERENCES engineering_projects(id) ON DELETE CASCADE,
+                title TEXT NOT NULL, description TEXT NOT NULL, target_date TEXT NOT NULL,
+                completed_at_ms INTEGER, created_at_ms INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL
+            );
+            CREATE INDEX milestones_date ON project_milestones(target_date);
+            CREATE TABLE project_files (
+                id TEXT PRIMARY KEY NOT NULL, project_id TEXT NOT NULL REFERENCES engineering_projects(id) ON DELETE CASCADE,
+                display_name TEXT NOT NULL, path TEXT NOT NULL, category TEXT NOT NULL,
+                description TEXT NOT NULL, added_at_ms INTEGER NOT NULL
+            );
+            CREATE TABLE project_journal (
+                id TEXT PRIMARY KEY NOT NULL, project_id TEXT NOT NULL REFERENCES engineering_projects(id) ON DELETE CASCADE,
+                title TEXT NOT NULL, entry_date TEXT NOT NULL, description TEXT NOT NULL,
+                work_completed TEXT NOT NULL, problems TEXT NOT NULL, solutions TEXT NOT NULL,
+                skills TEXT NOT NULL, file_ids_json TEXT NOT NULL DEFAULT '[]',
+                created_at_ms INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL
+            );
+            PRAGMA user_version = 4; COMMIT;")
             .map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -276,7 +312,7 @@ mod tests {
                     .unwrap()
                     .pragma_query_value(None, "user_version", |row| row.get(0))
                     .unwrap();
-            assert_eq!(version, 3);
+            assert_eq!(version, 4);
         }
         std::fs::remove_file(path).unwrap();
     }
@@ -296,7 +332,7 @@ mod tests {
         let path = unique_test_path();
         {
             let connection = Connection::open(&path).unwrap();
-            connection.execute_batch("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO app_state VALUES ('marker', 'keep'); PRAGMA user_version = 4;").unwrap();
+            connection.execute_batch("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO app_state VALUES ('marker', 'keep'); PRAGMA user_version = 5;").unwrap();
         }
         assert!(Database::open(&path).is_err());
         let connection = Connection::open(&path).unwrap();
@@ -332,7 +368,37 @@ mod tests {
                 .unwrap()
                 .pragma_query_value(None, "user_version", |r| r.get(0))
                 .unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
+        drop(db);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn version_three_migration_preserves_tasks_and_adds_project_link() {
+        let path = unique_test_path();
+        {
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch("CREATE TABLE tasks (id TEXT PRIMARY KEY NOT NULL,title TEXT NOT NULL,description TEXT NOT NULL,category TEXT NOT NULL,priority TEXT NOT NULL,due_date TEXT,due_time TEXT,subtasks_json TEXT NOT NULL,reminder_offset_minutes INTEGER,created_at_ms INTEGER NOT NULL,updated_at_ms INTEGER NOT NULL,completed_at_ms INTEGER,first_completed_at_ms INTEGER);
+                INSERT INTO tasks VALUES ('existing','Original task','','','normal',NULL,NULL,'[]',NULL,1,1,NULL,NULL);
+                CREATE TABLE focus_sessions (id TEXT PRIMARY KEY,status TEXT NOT NULL,run_started_at_ms INTEGER);
+                PRAGMA user_version = 3;").unwrap();
+        }
+        let db = Database::open(&path).unwrap();
+        let c = db.0.lock().unwrap();
+        let (title, project_id): (String, Option<String>) = c
+            .query_row(
+                "SELECT title,project_id FROM tasks WHERE id='existing'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(title, "Original task");
+        assert_eq!(project_id, None);
+        let version: i64 = c
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 4);
+        drop(c);
         drop(db);
         std::fs::remove_file(path).unwrap();
     }

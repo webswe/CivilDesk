@@ -35,6 +35,7 @@ pub struct Task {
     pub updated_at_ms: i64,
     pub completed_at_ms: Option<i64>,
     pub first_completed_at_ms: Option<i64>,
+    pub project_id: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -149,6 +150,7 @@ fn task_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         updated_at_ms: r.get(10)?,
         completed_at_ms: r.get(11)?,
         first_completed_at_ms: r.get(12)?,
+        project_id: r.get(13)?,
     })
 }
 #[derive(Clone, Serialize)]
@@ -220,7 +222,7 @@ fn strings(c: &Connection, sql: &str) -> Result<Vec<String>, String> {
 impl Database {
     pub fn workspace(&self) -> Result<WorkspaceData, String> {
         let c = self.0.lock().map_err(|_| "database lock failed")?;
-        let tasks=c.prepare("SELECT id,title,description,category,priority,due_date,due_time,subtasks_json,reminder_offset_minutes,created_at_ms,updated_at_ms,completed_at_ms,first_completed_at_ms FROM tasks ORDER BY created_at_ms DESC").map_err(|e|e.to_string())?
+        let tasks=c.prepare("SELECT id,title,description,category,priority,due_date,due_time,subtasks_json,reminder_offset_minutes,created_at_ms,updated_at_ms,completed_at_ms,first_completed_at_ms,project_id FROM tasks ORDER BY created_at_ms DESC").map_err(|e|e.to_string())?
             .query_map([],task_row).map_err(|e|e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e|e.to_string())?;
         let sessions=c.prepare("SELECT id,task_id,status,duration_minutes,break_minutes,started_at_ms,run_started_at_ms,elapsed_ms,finished_at_ms FROM focus_sessions ORDER BY started_at_ms DESC LIMIT 200").map_err(|e|e.to_string())?
             .query_map([],focus_row).map_err(|e|e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e|e.to_string())?;
