@@ -179,6 +179,8 @@ pub struct FocusSession {
     pub run_started_at_ms: Option<i64>,
     pub elapsed_ms: i64,
     pub finished_at_ms: Option<i64>,
+    pub course_id: Option<String>,
+    pub study_block_id: Option<String>,
 }
 fn focus_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<FocusSession> {
     Ok(FocusSession {
@@ -191,6 +193,8 @@ fn focus_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<FocusSession> {
         run_started_at_ms: r.get(6)?,
         elapsed_ms: r.get(7)?,
         finished_at_ms: r.get(8)?,
+        course_id: r.get(9)?,
+        study_block_id: r.get(10)?,
     })
 }
 #[derive(Serialize)]
@@ -238,7 +242,7 @@ impl Database {
         let c = self.0.lock().map_err(|_| "database lock failed")?;
         let tasks=c.prepare("SELECT id,title,description,category,priority,due_date,due_time,subtasks_json,reminder_offset_minutes,created_at_ms,updated_at_ms,completed_at_ms,first_completed_at_ms,project_id FROM tasks ORDER BY created_at_ms DESC").map_err(|e|e.to_string())?
             .query_map([],task_row).map_err(|e|e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e|e.to_string())?;
-        let sessions=c.prepare("SELECT id,task_id,status,duration_minutes,break_minutes,started_at_ms,run_started_at_ms,elapsed_ms,finished_at_ms FROM focus_sessions ORDER BY started_at_ms DESC LIMIT 200").map_err(|e|e.to_string())?
+        let sessions=c.prepare("SELECT id,task_id,status,duration_minutes,break_minutes,started_at_ms,run_started_at_ms,elapsed_ms,finished_at_ms,course_id,study_block_id FROM focus_sessions ORDER BY started_at_ms DESC LIMIT 200").map_err(|e|e.to_string())?
             .query_map([],focus_row).map_err(|e|e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e|e.to_string())?;
         let (focus_duration_minutes, break_duration_minutes) = c
             .query_row(
@@ -340,6 +344,7 @@ impl Database {
             .map_err(|e| e.to_string())?;
         Ok(())
     }
+    #[allow(clippy::too_many_arguments)]
     pub fn focus_action(
         &self,
         action: &str,
@@ -347,6 +352,8 @@ impl Database {
         task_id: Option<&str>,
         duration: i64,
         break_minutes: i64,
+        course_id: Option<&str>,
+        study_block_id: Option<&str>,
     ) -> Result<(), String> {
         let mut c = self.0.lock().map_err(|_| "database lock failed")?;
         let tx = c.transaction().map_err(|e| e.to_string())?;
@@ -366,9 +373,12 @@ impl Database {
             if active > 0 {
                 return Err("Finish or stop the current focus session first".into());
             }
-            tx.execute("INSERT INTO focus_sessions(id,task_id,status,duration_minutes,break_minutes,started_at_ms,run_started_at_ms,elapsed_ms) VALUES (?1,?2,'running',?3,?4,?5,?5,0)",params![id,task_id,duration,break_minutes,now]).map_err(|e|e.to_string())?;
+            // Academic context (course, task, study block) is resolved and validated before the session exists.
+            let (course, task, block) =
+                crate::study::resolve_focus_context(&tx, course_id, task_id, study_block_id)?;
+            tx.execute("INSERT INTO focus_sessions(id,task_id,status,duration_minutes,break_minutes,started_at_ms,run_started_at_ms,elapsed_ms,course_id,study_block_id) VALUES (?1,?2,'running',?3,?4,?5,?5,0,?6,?7)",params![id,task,duration,break_minutes,now,course,block]).map_err(|e|e.to_string())?;
         } else {
-            let s:FocusSession=tx.query_row("SELECT id,task_id,status,duration_minutes,break_minutes,started_at_ms,run_started_at_ms,elapsed_ms,finished_at_ms FROM focus_sessions WHERE id=?1",[id],focus_row).optional().map_err(|e|e.to_string())?.ok_or("Focus session no longer exists")?;
+            let s:FocusSession=tx.query_row("SELECT id,task_id,status,duration_minutes,break_minutes,started_at_ms,run_started_at_ms,elapsed_ms,finished_at_ms,course_id,study_block_id FROM focus_sessions WHERE id=?1",[id],focus_row).optional().map_err(|e|e.to_string())?.ok_or("Focus session no longer exists")?;
             let elapsed =
                 s.elapsed_ms + s.run_started_at_ms.map_or(0, |start| (now - start).max(0));
             match action {
@@ -562,15 +572,21 @@ mod tests {
     #[test]
     fn focus_cannot_finish_early() {
         let (d, p) = db();
-        d.focus_action("start", "session", None, 1, 5).unwrap();
-        assert!(d.focus_action("complete", "session", None, 0, 0).is_err());
+        d.focus_action("start", "session", None, 1, 5, None, None)
+            .unwrap();
+        assert!(d
+            .focus_action("complete", "session", None, 0, 0, None, None)
+            .is_err());
         drop(d);
         let d = Database::open(&p).unwrap();
         assert_eq!(d.workspace().unwrap().sessions[0].status, "paused");
         assert_eq!(d.workspace().unwrap().sessions[0].elapsed_ms, 0);
-        d.focus_action("resume", "session", None, 0, 0).unwrap();
-        d.focus_action("pause", "session", None, 0, 0).unwrap();
-        d.focus_action("stop", "session", None, 0, 0).unwrap();
+        d.focus_action("resume", "session", None, 0, 0, None, None)
+            .unwrap();
+        d.focus_action("pause", "session", None, 0, 0, None, None)
+            .unwrap();
+        d.focus_action("stop", "session", None, 0, 0, None, None)
+            .unwrap();
         assert_eq!(d.workspace().unwrap().progression.xp, 0);
         drop(d);
         std::fs::remove_file(p).unwrap()
@@ -604,7 +620,8 @@ mod tests {
         let (d, p) = db();
         for i in 0..3 {
             let id = format!("focus-{i}");
-            d.focus_action("start", &id, None, 1, 5).unwrap();
+            d.focus_action("start", &id, None, 1, 5, None, None)
+                .unwrap();
             d.0.lock()
                 .unwrap()
                 .execute(
@@ -612,8 +629,10 @@ mod tests {
                     params![id, now_ms() - 61_000],
                 )
                 .unwrap();
-            d.focus_action("complete", &id, None, 0, 0).unwrap();
-            d.focus_action("complete", &id, None, 0, 0).unwrap();
+            d.focus_action("complete", &id, None, 0, 0, None, None)
+                .unwrap();
+            d.focus_action("complete", &id, None, 0, 0, None, None)
+                .unwrap();
         }
         let progress = d.workspace().unwrap().progression;
         assert_eq!(progress.xp, 150);

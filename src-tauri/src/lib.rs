@@ -4,6 +4,7 @@ mod challenges;
 mod persistence;
 mod productivity;
 mod projects;
+mod study;
 
 use academic::{AcademicData, CourseInput, CourseworkInput, SemesterInput};
 use calendar::CalendarInput;
@@ -11,6 +12,7 @@ use challenges::ChallengeSettings;
 use persistence::{AppSnapshot, Database};
 use productivity::{TaskInput, WorkspaceData};
 use projects::{FileReference, JournalEntry, Milestone, Project, ProjectsData};
+use study::{StudyBlockInput, StudyData, StudyGoal};
 use tauri::Manager;
 
 struct RuntimeState {
@@ -83,6 +85,7 @@ fn set_focus_defaults(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn focus_action(
     state: tauri::State<'_, RuntimeState>,
     action: String,
@@ -90,10 +93,42 @@ fn focus_action(
     task_id: Option<String>,
     duration: i64,
     break_minutes: i64,
+    course_id: Option<String>,
+    study_block_id: Option<String>,
 ) -> Result<(), String> {
-    state
-        .database()?
-        .focus_action(&action, &id, task_id.as_deref(), duration, break_minutes)
+    state.database()?.focus_action(
+        &action,
+        &id,
+        task_id.as_deref(),
+        duration,
+        break_minutes,
+        course_id.as_deref(),
+        study_block_id.as_deref(),
+    )
+}
+
+#[tauri::command]
+fn load_study(state: tauri::State<'_, RuntimeState>) -> Result<StudyData, String> {
+    state.database()?.study()
+}
+#[tauri::command]
+fn save_study_block(
+    state: tauri::State<'_, RuntimeState>,
+    block: StudyBlockInput,
+) -> Result<(), String> {
+    state.database()?.save_study_block(block)
+}
+#[tauri::command]
+fn set_study_block_cancelled(
+    state: tauri::State<'_, RuntimeState>,
+    id: String,
+    cancelled: bool,
+) -> Result<(), String> {
+    state.database()?.set_study_block_cancelled(&id, cancelled)
+}
+#[tauri::command]
+fn save_study_goal(state: tauri::State<'_, RuntimeState>, goal: StudyGoal) -> Result<(), String> {
+    state.database()?.save_study_goal(goal)
 }
 
 #[tauri::command]
@@ -393,7 +428,11 @@ pub fn run() {
             save_course,
             set_course_archived,
             save_coursework,
-            unlink_coursework
+            unlink_coursework,
+            load_study,
+            save_study_block,
+            set_study_block_cancelled,
+            save_study_goal
         ])
         .run(tauri::generate_context!())
         .expect("CivilDesk could not start");

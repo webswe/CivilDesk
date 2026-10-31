@@ -155,9 +155,9 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), String> {
     let version: u32 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|e| format!("Could not read database schema version: {e}"))?;
-    if version > 6 {
+    if version > 7 {
         return Err(format!(
-            "Database schema version {version} is newer than supported version 6"
+            "Database schema version {version} is newer than supported version 7"
         ));
     }
     if version == 0 {
@@ -304,6 +304,36 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), String> {
             PRAGMA user_version = 6; COMMIT;")
             .map_err(|e| e.to_string())?;
     }
+    if version < 7 {
+        conn.execute_batch("BEGIN IMMEDIATE;
+            CREATE TABLE study_blocks (
+                id TEXT PRIMARY KEY NOT NULL,
+                course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE RESTRICT,
+                task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+                title TEXT NOT NULL DEFAULT '',
+                start_date TEXT NOT NULL, start_time TEXT NOT NULL,
+                duration_minutes INTEGER NOT NULL CHECK(duration_minutes BETWEEN 5 AND 480),
+                status TEXT NOT NULL DEFAULT 'planned' CHECK(status IN ('planned','cancelled')),
+                created_at_ms INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL, cancelled_at_ms INTEGER
+            );
+            CREATE INDEX study_blocks_date ON study_blocks(start_date, start_time);
+            CREATE INDEX study_blocks_course ON study_blocks(course_id);
+            CREATE INDEX study_blocks_task ON study_blocks(task_id);
+            CREATE TABLE study_goals (
+                course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE RESTRICT,
+                effective_week TEXT NOT NULL,
+                weekly_minutes INTEGER CHECK(weekly_minutes BETWEEN 1 AND 10080),
+                weekly_sessions INTEGER CHECK(weekly_sessions BETWEEN 1 AND 100),
+                updated_at_ms INTEGER NOT NULL,
+                PRIMARY KEY(course_id, effective_week)
+            );
+            ALTER TABLE focus_sessions ADD COLUMN course_id TEXT REFERENCES courses(id) ON DELETE RESTRICT;
+            ALTER TABLE focus_sessions ADD COLUMN study_block_id TEXT REFERENCES study_blocks(id) ON DELETE SET NULL;
+            CREATE INDEX focus_sessions_course ON focus_sessions(course_id, finished_at_ms);
+            CREATE INDEX focus_sessions_block ON focus_sessions(study_block_id);
+            PRAGMA user_version = 7; COMMIT;")
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -366,7 +396,7 @@ mod tests {
                     .unwrap()
                     .pragma_query_value(None, "user_version", |row| row.get(0))
                     .unwrap();
-            assert_eq!(version, 6);
+            assert_eq!(version, 7);
         }
         std::fs::remove_file(path).unwrap();
     }
@@ -386,7 +416,7 @@ mod tests {
         let path = unique_test_path();
         {
             let connection = Connection::open(&path).unwrap();
-            connection.execute_batch("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO app_state VALUES ('marker', 'keep'); PRAGMA user_version = 7;").unwrap();
+            connection.execute_batch("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO app_state VALUES ('marker', 'keep'); PRAGMA user_version = 8;").unwrap();
         }
         assert!(Database::open(&path).is_err());
         let connection = Connection::open(&path).unwrap();
@@ -422,7 +452,7 @@ mod tests {
                 .unwrap()
                 .pragma_query_value(None, "user_version", |r| r.get(0))
                 .unwrap();
-        assert_eq!(version, 6);
+        assert_eq!(version, 7);
         drop(db);
         std::fs::remove_file(path).unwrap();
     }
@@ -451,7 +481,7 @@ mod tests {
         let version: i64 = c
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 6);
+        assert_eq!(version, 7);
         drop(c);
         drop(db);
         std::fs::remove_file(path).unwrap();

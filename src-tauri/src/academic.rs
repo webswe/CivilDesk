@@ -396,6 +396,12 @@ impl Database {
             params![task.id, input.course_id, input.work_type, input.reference_notes, now_ms()],
         )
         .map_err(sql)?;
+        // Study blocks planned for this task in another course no longer describe it; keep the block, drop the link.
+        tx.execute(
+            "UPDATE study_blocks SET task_id=NULL WHERE task_id=?1 AND course_id<>?2",
+            params![task.id, input.course_id],
+        )
+        .map_err(sql)?;
         tx.commit().map_err(sql)
     }
 
@@ -404,6 +410,11 @@ impl Database {
         let c = self.0.lock().map_err(|_| "database lock failed")?;
         c.execute("DELETE FROM task_academic WHERE task_id=?1", [task_id])
             .map_err(sql)?;
+        c.execute(
+            "UPDATE study_blocks SET task_id=NULL WHERE task_id=?1",
+            [task_id],
+        )
+        .map_err(sql)?;
         Ok(())
     }
 }
@@ -610,7 +621,15 @@ mod tests {
         // Build a genuine v5 database, then upgrade it.
         c.execute_batch("PRAGMA user_version = 0;").unwrap();
         migrate(&c).unwrap();
-        c.execute_batch("DROP TABLE task_academic; DROP TABLE courses; DROP TABLE semesters; PRAGMA user_version = 5;
+        c.execute_batch("DROP TABLE study_goals; DROP TABLE study_blocks; DROP TABLE focus_sessions;
+            CREATE TABLE focus_sessions (
+                id TEXT PRIMARY KEY NOT NULL, task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+                status TEXT NOT NULL, duration_minutes INTEGER NOT NULL, break_minutes INTEGER NOT NULL,
+                started_at_ms INTEGER NOT NULL, run_started_at_ms INTEGER, elapsed_ms INTEGER NOT NULL DEFAULT 0,
+                finished_at_ms INTEGER
+            );
+            CREATE UNIQUE INDEX one_active_focus ON focus_sessions((1)) WHERE status IN ('running', 'paused');
+            DROP TABLE task_academic; DROP TABLE courses; DROP TABLE semesters; PRAGMA user_version = 5;
             INSERT INTO tasks(id,title,description,category,priority,created_at_ms,updated_at_ms) VALUES ('old','Old school task','','School','normal',1,1);").unwrap();
         migrate(&c).unwrap();
         migrate(&c).unwrap();
