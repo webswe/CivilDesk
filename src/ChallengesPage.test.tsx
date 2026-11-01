@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import library from '../src-tauri/src/challenge_library.json';
 import { ChallengesPage } from './ChallengesPage';
 import type { ChallengeData } from './services/challenges';
@@ -26,5 +26,22 @@ describe('weekly challenge board', () => {
     const upcoming = screen.getByRole('heading', { name: 'Upcoming · 2026-11-09' }).closest('section')!;
     expect(within(upcoming).getByText(/Automatic weekly assignments are off/)).toBeTruthy();
     expect(within(upcoming).queryByRole('button')).toBeNull();
+  });
+
+  it('explains that fully checked criteria still need an explicit completion', () => {
+    const value = data(false); const c = value.challenges[0]!;
+    const progress = (checks: number[], status: 'In Progress' | 'Completed') => ({ challengeId: c.id, contentVersion: 1, mode: 'guided' as const, status, notes: '', deadlineDate: null, startedAtMs: 1, completedAtMs: status === 'Completed' ? 2 : null, checks });
+    const all = c.checklist.map((_, i) => i);
+    value.progress = [progress(all.slice(1), 'In Progress')];
+    const first = page(value);
+    fireEvent.click(screen.getByRole('button', { name: 'Library' })); fireEvent.click(screen.getByRole('button', { name: new RegExp(c.title) }));
+    expect(screen.queryByText(/Every criterion is checked/)).toBeNull();
+    first.unmount();
+    value.progress = [progress(all, 'In Progress')];
+    page(value);
+    fireEvent.click(screen.getByRole('button', { name: 'Library' })); fireEvent.click(screen.getByRole('button', { name: new RegExp(c.title) }));
+    expect(screen.getByRole('status')).toHaveTextContent(/Every criterion is checked/);
+    expect(screen.getByRole('button', { name: 'Mark completed' })).toBeEnabled();
+    expect(screen.getByText(`${all.length} of ${all.length} criteria checked`)).toBeTruthy();
   });
 });

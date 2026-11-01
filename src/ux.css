@@ -205,3 +205,54 @@
 .review-grid p { margin-bottom: 4px; font-size: 13px; }
 .skipped-note { margin: 0 0 6px 6px; font-size: 12px; }
 .calendar-chip.routine { background: #4f4561; color: #efe8fa; }
+
+/* Phase 4C.1: readability and hierarchy. Shared type scale; nothing below drops under 12px. */
+:root { --fs-xs: 12px; --fs-sm: 13px; --fs-md: 14px; --text-muted: #b9a9b0; }
+.soft-button, .text-link, .time-zone-note, .form-error, .task-meta span, .tag, .pip-caption, .save-status { font-size: var(--fs-xs); }
+.primary-button { font-size: var(--fs-sm); }
+.soft-button { font-weight: 600; }
+.segmented button { font-size: var(--fs-sm); }
+.segmented button span { font-size: var(--fs-xs); }
+.task-main p, .day-row-text small, .goal-name small, .course-row-text small, .inline-card small, .week-nav small { font-size: var(--fs-xs); color: var(--text-muted); }
+.task-main strong, .day-row-text strong { font-size: var(--fs-md); }
+.rose-dialog label, .focus-options label, .page-panel .form-grid label, .setting-group > label:not(.setting-row) { font-size: var(--fs-xs); }
+.quiet-note, .day-progress { color: var(--text-muted); }
+.simple-list li { font-size: var(--fs-sm); }
+
+/* Personal: feature tabs are the page navigation; the area filter is a quieter control over the list. */
+.personal-views { margin: 14px 0 0; }
+.personal-overview { gap: 26px; margin: 22px 0 4px; }
+.list-heading { margin: 30px 0 0; }
+.segmented.area-filter { margin: 8px 0 0; background: transparent; border-color: #3f323b; padding: 2px; }
+.segmented.area-filter button { padding: 4px 11px; font-size: var(--fs-xs); }
+.segmented.area-filter button.active { background: #4a3542; color: #f5eff0; }
+.area-filter + .toolbar { margin-top: 10px; }
+.toolbar { align-items: stretch; }
+.toolbar select { min-height: 40px; }
+.priority-add { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* Compact empty states and the one next action they offer. */
+.empty-state.compact { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; text-align: left; padding: 14px 18px; margin-top: 8px; border-radius: 12px; }
+.empty-state.compact p { margin: 0; font-size: var(--fs-sm); line-height: 1.5; }
+.empty-state.compact strong { color: #f5eff0; font-weight: 600; }
+.ready-note { margin: 8px 0 0; padding: 8px 12px; border-left: 3px solid #d9a4b1; background: #3a2c36; border-radius: 0 8px 8px 0; font-size: var(--fs-sm); line-height: 1.5; color: #eadce2; }
+.ready-note strong { color: #fff1f2; }
+
+/* My Day: steady rhythm between Today, Priorities, Coming up and In progress. */
+.day-grid { gap: 48px; }
+.day-grid .priorities { margin-top: 28px; }
+.day-grid aside { gap: 30px; }
+.day-grid h2 { font-size: var(--fs-xs); margin-bottom: 10px; }
+.day-grid .priorities h2 { font-size: var(--fs-xs); }
+.next-up small { font-size: var(--fs-xs); }
+.day-time { font-size: var(--fs-xs); }
+.personal-overview h2, .priorities h2 { margin-bottom: 8px; }
+.goal-detail h3, .school-more h3 { font-size: var(--fs-sm); }
+.habit-day { font-size: var(--fs-xs); }
+.weekday-chip span { font-size: var(--fs-xs); }
+.review-grid p, .quiet-note { font-size: var(--fs-sm); }
+
+@media (max-width: 760px) {
+  .segmented.area-filter { width: 100%; }
+  .empty-state.compact { align-items: flex-start; }
+}

@@ -55,13 +55,13 @@ export function MyDay({ personal, personalOps, run, openPersonal, onProgress, na
     <div className="day-grid">
       <section aria-labelledby="today-heading">
         <h2 id="today-heading">Today</h2>
-        {nothingToday ? <p className="quiet-note">Nothing scheduled and nothing due. {total > 0 ? 'Everything planned for today is done.' : 'Enjoy the open space, or plan something.'}</p>
+        {nothingToday ? <p className="quiet-note">Nothing scheduled and nothing due. {total > 0 ? 'Everything planned for today is done.' : 'Enjoy the open space.'}</p>
           : <>{agenda.schedule.length > 0 && <ul className="day-list" aria-label="Today's schedule">{agenda.schedule.map(e => <li key={e.key} className="day-row event"><span className="day-time">{e.time ?? 'All day'}</span><span className="day-row-text"><strong>{e.title}</strong>{e.time && <small>{e.note}</small>}</span></li>)}</ul>}
             {unplanned.length > 0 && <ul className="day-list" aria-label="Tasks for today">{unplanned.map(row)}</ul>}
             {dayStudy.today.length > 0 && <ul className="day-list" aria-label="Study blocks today">{dayStudy.today.map(b => { const missed = blockState(b, study.sessions, now) === 'missed'; const label = b.title || 'Study session';
               return <li key={b.id} className="day-row study"><span className="day-time">{b.startTime}</span><span className="day-row-text"><strong>{label}</strong><small><button className="context-link" aria-label={'Open study block ' + label} onClick={() => openStudyBlock(b.id)}>{'Study · ' + courseCode(b.courseId)}</button>{' · ' + timeRange(b) + (missed ? ' · Earlier today' : '')}</small></span>
                 <button className="soft-button" aria-label={'Start studying ' + label} onClick={() => startBlock(b)}><PlayIcon size={13}/> Start</button></li>; })}</ul>}</>}
-        <DailyPriorities tasks={data.tasks} personal={personal} today={agenda.today} ops={personalOps} run={run} complete={complete} startFocus={id => startFocus(id)} label="Today's priorities"/>
+        <DailyPriorities tasks={data.tasks} personal={personal} today={agenda.today} ops={personalOps} run={run} complete={complete} startFocus={id => startFocus(id)} newTask={newTask} label="Today's priorities"/>
         {total > 0 && <div className="day-progress" aria-label="Today's progress"><progress max={total} value={agenda.doneToday} aria-label="Tasks completed today"/><span>{agenda.doneToday} of {total} done{agenda.focusMinutesToday > 0 ? ' · ' + agenda.focusMinutesToday + ' min focused' : ''}</span></div>}
         {total === 0 && agenda.focusMinutesToday > 0 && <p className="quiet-note">{agenda.focusMinutesToday} min focused today.</p>}
         <button className="text-link" onClick={() => goTo('Tasks')}>All tasks <ChevronRight size={13}/></button>
@@ -76,7 +76,7 @@ export function MyDay({ personal, personalOps, run, openPersonal, onProgress, na
         <TodayHabits personal={personal} today={agenda.today} ops={personalOps} run={run} onProgress={onProgress} openPersonal={openPersonal} headingId="habits-heading"/>
         {agenda.activeChallenge && <section aria-labelledby="eng-heading">
           <h2 id="eng-heading">In progress</h2>
-          <button className="inline-card" onClick={() => goTo('Weekly Challenges')}><span><strong>{agenda.activeChallenge.title}</strong><small>Engineering challenge · {agenda.activeChallenge.checks}/{agenda.activeChallenge.total} checks</small></span><ChevronRight size={16}/></button>
+          <button className="inline-card" onClick={() => goTo('Weekly Challenges')}><span><strong>{agenda.activeChallenge.title}</strong><small>Engineering challenge · {agenda.activeChallenge.checks}/{agenda.activeChallenge.total} checks{agenda.activeChallenge.checks >= agenda.activeChallenge.total ? ' · ready to mark completed' : ''}</small></span><ChevronRight size={16}/></button>
         </section>}
       </aside>
     </div>

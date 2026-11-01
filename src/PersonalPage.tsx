@@ -48,7 +48,8 @@ export function PersonalPage(p: PersonalPageProps) {
   return <TasksPage data={data} scope="personal" startWithNew={p.startWithNew} onScope={p.onScope} save={p.save} remove={p.remove} complete={p.complete} extras={{
     tabs,
     listHeading: 'Tasks',
-    above: <Overview {...p}/>,
+    areaSwitcherInList: true,
+    above: ({ newTask }) => <Overview {...p} newTask={newTask}/>,
     rowExtra: t => { const rule = ruleByTask.get(t.id); return <>
       {rule && <span className="tag" title={describeRule(rule)}>Repeats</span>}
       {!t.completedAtMs && <button className={'icon-button priority-toggle' + (planned.has(t.id) ? ' on' : '')} aria-label={'Today\'s priority: ' + t.title} aria-pressed={planned.has(t.id)} title={planned.has(t.id) ? 'Remove from today\'s priorities' : 'Make this one of today\'s priorities'} onClick={() => togglePriority(t)}><Star size={16} fill={planned.has(t.id) ? 'currentColor' : 'none'}/></button>}
@@ -57,12 +58,12 @@ export function PersonalPage(p: PersonalPageProps) {
   }}/>;
 }
 
-function Overview({ data, personal, today, ops, run, onTab, complete, startFocus, onProgress }: PersonalPageProps) {
+function Overview({ data, personal, today, ops, run, onTab, complete, startFocus, onProgress, newTask }: PersonalPageProps & { newTask: () => void }) {
   const week = weeklyReview(today, personal, data.tasks, today);
   const habitsDone = week.habits.reduce((n, h) => n + h.done, 0); const habitsExpected = week.habits.reduce((n, h) => n + h.expected, 0);
   const activeGoals = personal.goals.filter(g => g.status === 'active').length;
   return <div className="personal-overview">
-    <DailyPriorities tasks={data.tasks} personal={personal} today={today} ops={ops} run={run} complete={complete} startFocus={startFocus}/>
+    <DailyPriorities tasks={data.tasks} personal={personal} today={today} ops={ops} run={run} complete={complete} startFocus={startFocus} newTask={newTask}/>
     <TodayHabits personal={personal} today={today} ops={ops} run={run} onProgress={onProgress} openPersonal={onTab} headingId="ov-habits-heading"/>
     <p className="quiet-note overview-summary" aria-label="Progress this week">This week: {plural(week.tasksCompleted, 'task')} done
       {habitsExpected > 0 ? ` · habits ${habitsDone} of ${habitsExpected}` : ''}{week.routines.completed ? ` · ${plural(week.routines.completed, 'routine')} finished` : ''}{activeGoals ? ` · ${plural(activeGoals, 'active goal')}` : ''}. <button className="text-link inline-link" onClick={() => onTab('week')}>Weekly review</button></p>

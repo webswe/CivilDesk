@@ -188,4 +188,59 @@ describe('personal workspace', () => {
     expect(await screen.findByRole('button', { name: 'Open routine Evening reset' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Open routine Anytime stretch' })).not.toBeInTheDocument();
   });
+
+  describe('Phase 4C.1 presentation', () => {
+    it('keeps the feature tabs by the heading and moves the task-area filter into the Tasks section', async () => {
+      await enter(); await openPersonal();
+      const tabs = screen.getByRole('group', { name: 'Personal view' });
+      const area = screen.getByRole('group', { name: 'Task area' });
+      const heading = screen.getByRole('heading', { name: 'Tasks' });
+      expect(tabs.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(heading.compareDocumentPosition(area) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(screen.getAllByRole('group', { name: 'Task area' })).toHaveLength(1);
+      // Filtering still works: switching area keeps the page reachable and the buttons stay real, pressable buttons.
+      expect(within(area).getByRole('button', { name: /^Personal/ })).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('replaces the empty priority selector with a clear next action when no task exists', async () => {
+      await enter(); await openPersonal();
+      expect(screen.queryByRole('combobox', { name: 'Add a priority' })).not.toBeInTheDocument();
+      expect(screen.getByText(/A task has to exist before it can be a priority/)).toBeInTheDocument();
+      click('Add a task to start');
+      expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    });
+
+    it('shows the priority selector once an open task exists', async () => {
+      await saveTask(task({ id: 'one', title: 'Call the landlord' }));
+      await enter(); await openPersonal();
+      expect(screen.getByRole('combobox', { name: 'Add a priority' })).toBeEnabled();
+      expect(screen.queryByText(/A task has to exist/)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Add a task to start' })).not.toBeInTheDocument();
+    });
+
+    it('offers a first-task action when the list is empty', async () => {
+      await enter(); await openPersonal();
+      const empty = screen.getByText('Nothing here yet.').closest('.empty-state') as HTMLElement;
+      expect(within(empty).getByRole('button', { name: 'Add your first task' })).toBeInTheDocument();
+    });
+
+    it('tells filtered-out tasks apart from having none, and can clear the filter', async () => {
+      await saveTask(task({ id: 'one', title: 'Water the plants' }));
+      await enter(); await openPersonal();
+      fireEvent.change(screen.getByLabelText('Search tasks'), { target: { value: 'zzz' } });
+      expect(screen.getByText(/No tasks match this search or filter/)).toBeInTheDocument();
+      expect(screen.queryByText('Nothing here yet.')).not.toBeInTheDocument();
+      click('Clear search and filter');
+      expect(await screen.findByText('Water the plants')).toBeInTheDocument();
+    });
+
+    it('says so when every task is done and offers to show completed ones', async () => {
+      await saveTask(task({ id: 'one', title: 'Old errand' }));
+      await enter(); await openPersonal();
+      fireEvent.click(screen.getByRole('button', { name: 'Complete Old errand' }));
+      expect(await screen.findByText(/No open tasks here/)).toBeInTheDocument();
+      click('Show completed tasks');
+      expect(await screen.findByText('Old errand')).toBeInTheDocument();
+    });
+  });
 });
