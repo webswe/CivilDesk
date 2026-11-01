@@ -52,6 +52,7 @@ if (existsSync(path.join(root, workflow))) {
   const text = read(workflow);
   assert.ok(/workflow_dispatch/.test(text) && !/^\s*(push|pull_request|schedule):/m.test(text), 'E2E workflow must be manual only.');
   assert.ok(/--no-bundle/.test(text) && /tauri\.e2e\.conf\.json/.test(text));
+  assert.ok(/--features notion-mock/.test(text), 'E2E workflow must build the Notion mock feature.');
   assert.ok(!/tauri\.release\.conf|tauri\.acceptance\.conf|upload-artifact[\s\S]{0,200}nsis/i.test(text), 'E2E workflow must not touch release or Acceptance artifacts.');
 }
 console.log('E2E isolation checks passed: ' + e2e.identifier + ' / ' + e2e.mainBinaryName);

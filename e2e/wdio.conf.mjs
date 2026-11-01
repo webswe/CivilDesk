@@ -8,6 +8,8 @@ import { e2eDataPaths, resetE2eData } from './lib/guard.mjs';
 import { seedUpgradeFixture } from './lib/fixture.mjs';
 import { expectedSchemaVersion, inspectDatabase } from './lib/db.mjs';
 import { waitForAppExit } from './lib/process.mjs';
+import { deleteE2eCredential } from './lib/credentials.mjs';
+import { MOCK_PORT } from './lib/notion-mock.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
@@ -62,13 +64,18 @@ export const config = {
     fs.mkdirSync(path.join(results, 'screenshots'), { recursive: true });
     if (!fs.existsSync(binary)) throw new Error('E2E binary not found: ' + binary + '. Build it with: npm run tauri build -- --debug --no-bundle --config src-tauri/tauri.e2e.conf.json');
     resetE2eData();
+    // Only the E2E identity's own Notion credential is ever removed, so an interrupted earlier run cannot leak into this one.
+    deleteE2eCredential();
+    // The E2E binary (built with the notion-mock feature) may talk to this loopback address and nowhere else.
+    // The mock itself is started by the Notion spec.
+    process.env.CIVILDESK_NOTION_MOCK_URL = 'http://127.0.0.1:' + MOCK_PORT;
     const exe = path.join(os.homedir(), '.cargo', 'bin', process.platform === 'win32' ? 'tauri-driver.exe' : 'tauri-driver');
     const log = fs.openSync(path.join(results, 'tauri-driver.log'), 'a');
     driver = spawn(exe, [], { stdio: ['ignore', log, log] });
     driver.on('error', err => { console.error('tauri-driver failed to start:', err); process.exit(1); });
     await waitForPort(driverPort, 20000);
   }),
-  onComplete() { driver?.kill(); },
+  onComplete() { driver?.kill(); deleteE2eCredential(); },
 
   // Every spec file starts from an empty E2E profile (this only ever deletes the E2E identity folders).
   // A spec named *upgrade-v5* additionally gets a genuine schema-v5 database in that same disposable folder, written before the app starts.

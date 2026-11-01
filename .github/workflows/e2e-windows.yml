@@ -45,7 +45,7 @@ jobs:
           node scripts/check-e2e-config.mjs
           npx vitest run e2e/lib
       - name: Build the E2E application (debug, no installer, isolated identity)
-        run: npm run tauri build -- --debug --no-bundle --config src-tauri/tauri.e2e.conf.json
+        run: npm run tauri build -- --debug --no-bundle --config src-tauri/tauri.e2e.conf.json -- --features notion-mock
       - name: Confirm the binary
         shell: pwsh
         run: |

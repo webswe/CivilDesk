@@ -70,3 +70,4 @@
 }
 @media (max-width: 520px) { .notion-facts { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { .notion-panel * { transition: none !important; animation: none !important; } }
+.notion-sources .simple-list span { display: grid; gap: 1px; min-width: 0; overflow-wrap: anywhere; }
