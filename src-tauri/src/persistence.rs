@@ -468,7 +468,8 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), String> {
     }
     if version < 10 {
         // Phase 5A: nonsecret Notion connection metadata and the user's remembered sources. Credentials are never stored here.
-        conn.execute_batch("BEGIN IMMEDIATE;
+        conn.execute_batch(
+            "BEGIN IMMEDIATE;
             CREATE TABLE notion_connection (
                 id TEXT PRIMARY KEY NOT NULL CHECK(id = 'default'),
                 identifier TEXT NOT NULL,
@@ -485,8 +486,9 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), String> {
                 selected_at_ms INTEGER NOT NULL, last_verified_at_ms INTEGER,
                 PRIMARY KEY(connection_id, resource_id)
             );
-            PRAGMA user_version = 10; COMMIT;")
-            .map_err(|e| e.to_string())?;
+            PRAGMA user_version = 10; COMMIT;",
+        )
+        .map_err(|e| e.to_string())?;
     }
     Ok(())
 }

@@ -1,9 +1,11 @@
 //! Credential storage. Tokens live only in the Windows Credential Manager, scoped by application identity.
 //! They are never written to SQLite, configuration, logs, exports or frontend state.
 
+use std::fmt;
+
+#[cfg(test)]
 use std::{
     collections::HashMap,
-    fmt,
     sync::{Arc, Mutex},
 };
 
@@ -63,8 +65,9 @@ impl CredentialManagerStore {
         }
     }
     fn entry(&self) -> Result<keyring::Entry, SecretError> {
-        keyring::Entry::new(&self.service, ACCOUNT)
-            .map_err(|_| SecretError::Unavailable("Windows Credential Manager is unavailable.".into()))
+        keyring::Entry::new(&self.service, ACCOUNT).map_err(|_| {
+            SecretError::Unavailable("Windows Credential Manager is unavailable.".into())
+        })
     }
 }
 
@@ -74,20 +77,24 @@ impl SecretStore for CredentialManagerStore {
             Ok(value) => Ok(Some(Secret::new(value))),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(_) => Err(SecretError::Unavailable(
-                "The saved Notion credential could not be read from Windows Credential Manager.".into(),
+                "The saved Notion credential could not be read from Windows Credential Manager."
+                    .into(),
             )),
         }
     }
     fn set(&self, secret: &Secret) -> Result<(), SecretError> {
-        self.entry()?
-            .set_password(secret.expose())
-            .map_err(|_| SecretError::Unavailable("The Notion credential could not be saved to Windows Credential Manager.".into()))
+        self.entry()?.set_password(secret.expose()).map_err(|_| {
+            SecretError::Unavailable(
+                "The Notion credential could not be saved to Windows Credential Manager.".into(),
+            )
+        })
     }
     fn delete(&self) -> Result<(), SecretError> {
         match self.entry()?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(_) => Err(SecretError::Unavailable(
-                "The Notion credential could not be removed from Windows Credential Manager.".into(),
+                "The Notion credential could not be removed from Windows Credential Manager."
+                    .into(),
             )),
         }
     }
@@ -131,15 +138,18 @@ impl SecretStore for MemorySecretStore {
             .map(|v| Secret::new(v.clone())))
     }
     fn set(&self, secret: &Secret) -> Result<(), SecretError> {
+        self.vault.0.lock().unwrap().insert(
+            (self.service.clone(), ACCOUNT.into()),
+            secret.expose().to_string(),
+        );
+        Ok(())
+    }
+    fn delete(&self) -> Result<(), SecretError> {
         self.vault
             .0
             .lock()
             .unwrap()
-            .insert((self.service.clone(), ACCOUNT.into()), secret.expose().to_string());
-        Ok(())
-    }
-    fn delete(&self) -> Result<(), SecretError> {
-        self.vault.0.lock().unwrap().remove(&(self.service.clone(), ACCOUNT.into()));
+            .remove(&(self.service.clone(), ACCOUNT.into()));
         Ok(())
     }
 }
@@ -153,7 +163,8 @@ pub fn redact(text: &str, token: Option<&str>) -> String {
     // Notion tokens start with `ntn_` (current) or `secret_` (legacy); mask the whole word.
     let mut result = String::with_capacity(out.len());
     for word in out.split_inclusive(|c: char| c.is_whitespace() || "\"'<>,;()[]{}".contains(c)) {
-        let core = word.trim_end_matches(|c: char| c.is_whitespace() || "\"'<>,;()[]{}".contains(c));
+        let core =
+            word.trim_end_matches(|c: char| c.is_whitespace() || "\"'<>,;()[]{}".contains(c));
         let tail = &word[core.len()..];
         if (core.starts_with("ntn_") || core.starts_with("secret_")) && core.len() > 8 {
             result.push_str("[redacted]");
@@ -187,7 +198,10 @@ mod tests {
         ];
         let names: std::collections::HashSet<_> = ids.iter().map(|i| service_name(i)).collect();
         assert_eq!(names.len(), 4);
-        assert_eq!(service_name("com.webswe.civildesk.dev"), "com.webswe.civildesk.dev.notion");
+        assert_eq!(
+            service_name("com.webswe.civildesk.dev"),
+            "com.webswe.civildesk.dev.notion"
+        );
     }
 
     #[test]
@@ -197,19 +211,26 @@ mod tests {
         let prod = MemorySecretStore::new(&vault, "com.webswe.civildesk");
         let e2e = MemorySecretStore::new(&vault, "com.webswe.civildesk.e2e");
         dev.set(&Secret::new("ntn_dev_token_000000")).unwrap();
-        assert!(prod.get().unwrap().is_none(), "production must not see the development token");
+        assert!(
+            prod.get().unwrap().is_none(),
+            "production must not see the development token"
+        );
         assert!(e2e.get().unwrap().is_none());
         prod.set(&Secret::new("ntn_prod_token_00000")).unwrap();
         assert_eq!(dev.get().unwrap().unwrap().expose(), "ntn_dev_token_000000");
         prod.delete().unwrap();
         assert!(prod.get().unwrap().is_none());
-        assert!(dev.get().unwrap().is_some(), "deleting one identity must not affect another");
+        assert!(
+            dev.get().unwrap().is_some(),
+            "deleting one identity must not affect another"
+        );
         assert_eq!(vault.entries().len(), 1);
     }
 
     #[test]
     fn redaction_masks_tokens_and_token_shaped_words() {
-        let text = "failed with Bearer ntn_abcdefghijklmnop and secret_legacyvalue123 plus mytok123456";
+        let text =
+            "failed with Bearer ntn_abcdefghijklmnop and secret_legacyvalue123 plus mytok123456";
         let out = redact(text, Some("mytok123456"));
         assert!(!out.contains("abcdefghijklmnop"));
         assert!(!out.contains("legacyvalue"));
@@ -221,15 +242,29 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_credential_manager_round_trip_and_isolation() {
-        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        let a = CredentialManagerStore::for_identity(&format!("com.webswe.civildesk.unittest-a-{stamp}"));
-        let b = CredentialManagerStore::for_identity(&format!("com.webswe.civildesk.unittest-b-{stamp}"));
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let a = CredentialManagerStore::for_identity(&format!(
+            "com.webswe.civildesk.unittest-a-{stamp}"
+        ));
+        let b = CredentialManagerStore::for_identity(&format!(
+            "com.webswe.civildesk.unittest-b-{stamp}"
+        ));
         assert!(a.get().unwrap().is_none());
         a.set(&Secret::new("ntn_unit_test_value_1")).unwrap();
         assert_eq!(a.get().unwrap().unwrap().expose(), "ntn_unit_test_value_1");
         a.set(&Secret::new("ntn_unit_test_value_2")).unwrap();
-        assert_eq!(a.get().unwrap().unwrap().expose(), "ntn_unit_test_value_2", "replacement");
-        assert!(b.get().unwrap().is_none(), "another identity must not read it");
+        assert_eq!(
+            a.get().unwrap().unwrap().expose(),
+            "ntn_unit_test_value_2",
+            "replacement"
+        );
+        assert!(
+            b.get().unwrap().is_none(),
+            "another identity must not read it"
+        );
         a.delete().unwrap();
         assert!(a.get().unwrap().is_none());
         a.delete().unwrap();

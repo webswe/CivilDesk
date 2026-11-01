@@ -15,7 +15,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export function migrationScripts() {
   const source = fs.readFileSync(path.resolve(here, '../../src-tauri/src/persistence.rs'), 'utf8');
   const body = source.slice(source.indexOf('pub(crate) fn migrate'), source.indexOf('#[cfg(test)]'));
-  return [...body.matchAll(/execute_batch\("([\s\S]*?)"\)/g)].map(m => m[1].replaceAll('\\"', '"'));
+  return [...body.matchAll(/execute_batch\(\s*"([\s\S]*?)"\s*,?\s*\)/g)].map(m => m[1].replaceAll('\\"', '"'));
 }
 
 const day = offset => { const d = new Date(); d.setDate(d.getDate() + offset); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };

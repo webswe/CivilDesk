@@ -1,0 +1,72 @@
+/* Phase 5A — Notion integration (Settings). Rosewood palette; text is always rendered as plain text. */
+.notion-panel .sr-only, .notion-browser .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.notion-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.notion-head h2 { margin: 0; }
+.notion-state { font-size: 12px; font-weight: 650; padding: 3px 10px; border-radius: 999px; border: 1px solid #493a45; background: #291f27; color: #d6c8cf; }
+.notion-state.notion-ok { border-color: #5f8b6b; color: #bfe3c8; }
+.notion-state.notion-warn { border-color: #b08a4f; color: #f0d6a0; }
+.notion-state.notion-bad { border-color: #b4566a; color: #f6c0cb; }
+.notion-note { font-size: 12.5px; color: #b9a9b0; margin: 6px 0; line-height: 1.5; }
+.notion-problem { font-size: 13px; color: #f6c0cb; background: #3a2530; border: 1px solid #b4566a; border-radius: 8px; padding: 8px 12px; margin: 10px 0; }
+.notion-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 18px; margin: 12px 0; }
+.notion-facts dt, .notion-dl dt { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: #a995a0; }
+.notion-facts dd, .notion-dl dd { margin: 2px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.notion-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.notion-confirm { border: 1px solid #b4566a; border-radius: 10px; background: #2c2029; padding: 12px 14px; margin: 10px 0; }
+.notion-confirm p { font-size: 12.5px; color: #cdbec5; line-height: 1.5; }
+.notion-connect { display: grid; gap: 6px; max-width: 560px; }
+.notion-steps { font-size: 12.5px; color: #cdbec5; padding-left: 18px; margin: 8px 0; line-height: 1.55; }
+.notion-sources h3, .notion-browser h3 { font-size: 13px; margin: 16px 0 6px; }
+.notion-dialog-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
+.notion-dialog-head h2 { margin: 0; font-size: 18px; }
+.rose-dialog:has(.notion-browser) { width: min(860px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; }
+
+.notion-browser { min-width: 0; }
+.notion-back { margin-bottom: 8px; display: inline-flex; gap: 6px; align-items: center; }
+.notion-search { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.notion-search-field { flex: 1 1 200px; display: flex; align-items: center; gap: 8px; border: 1px solid #5a4854; border-radius: 8px; background: #1b161a; padding: 0 10px; color: #a995a0; }
+.notion-search-field input { border: 0; background: transparent; flex: 1; min-width: 0; padding: 8px 0; outline: none; }
+.notion-search-field:focus-within { outline: 2px solid #d9a4b1; outline-offset: 1px; }
+.notion-list { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 6px; }
+.notion-item { width: 100%; display: flex; align-items: center; gap: 12px; text-align: left; padding: 9px 12px; border: 1px solid #493a45; border-radius: 9px; background: #291f27; color: #f5eff0; }
+.notion-item:hover { background: #33262f; border-color: #6b5361; }
+.notion-item:focus-visible, .link-button:focus-visible { outline: 2px solid #d9a4b1; outline-offset: 2px; }
+.notion-kind { color: #d9a4b1; display: inline-flex; flex: none; }
+.notion-item-text { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.notion-item-text strong { font-size: 13.5px; overflow-wrap: anywhere; }
+.notion-item-text small, .simple-list small { color: #b9a9b0; font-size: 11.5px; }
+.notion-untitled { font-style: italic; color: #cdbec5; }
+.notion-badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #644551; color: #fff1f2; flex: none; }
+.notion-empty-state { border: 1px dashed #5a4854; border-radius: 10px; padding: 14px 16px; margin: 10px 0; }
+.notion-empty-state p { color: #b9a9b0; font-size: 12.5px; margin: 4px 0 0; line-height: 1.5; }
+.notion-title { margin: 6px 0 2px; font-size: 20px; overflow-wrap: anywhere; }
+.notion-select { margin: 10px 0 4px; display: grid; gap: 6px; justify-items: start; }
+.notion-select small { color: #b9a9b0; font-size: 12px; }
+.notion-props { list-style: none; padding: 0; margin: 4px 0; display: grid; gap: 4px; }
+.notion-props li { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; padding: 5px 0; border-bottom: 1px solid #3a2e37; }
+.notion-props li span { color: #b9a9b0; }
+.notion-props li small { flex-basis: 100%; color: #a995a0; }
+.notion-table-wrap { overflow-x: auto; border: 1px solid #493a45; border-radius: 9px; }
+.notion-table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.notion-table th, .notion-table td { text-align: left; padding: 7px 10px; border-bottom: 1px solid #3a2e37; vertical-align: top; white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.notion-table thead th { background: #291f27; color: #cdbec5; font-weight: 650; }
+.notion-table tbody th { font-weight: 600; }
+.notion-tag { display: inline-block; font-size: 11px; padding: 1px 8px; margin-right: 4px; border-radius: 999px; background: #3a2e37; color: #e8dce1; }
+.notion-empty { color: #8f7c87; }
+.notion-unsupported { color: #cdbec5; font-style: italic; }
+.notion-dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px 18px; margin: 12px 0; }
+.notion-blocks { display: grid; gap: 6px; border: 1px solid #3a2e37; border-radius: 9px; padding: 12px 14px; background: #1f191e; }
+.notion-blocks p, .notion-blocks blockquote, .notion-blocks h3, .notion-blocks h4 { margin: 0; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; white-space: pre-wrap; }
+.notion-blocks h3.notion-h { font-size: 15px; } .notion-blocks h4.notion-h { font-size: 13.5px; }
+.notion-blocks blockquote { border-left: 3px solid #644551; padding-left: 10px; color: #d6c8cf; }
+.notion-code { margin: 0; background: #151115; border-radius: 6px; padding: 8px 10px; font-size: 12px; overflow-x: auto; white-space: pre; }
+.notion-todo { display: flex; gap: 8px; align-items: baseline; font-size: 13px; }
+.link-button { background: none; border: 0; padding: 0; color: #e7b7c3; text-decoration: underline; font-size: inherit; cursor: pointer; }
+
+@media (max-width: 800px) {
+  .notion-facts { grid-template-columns: repeat(2, 1fr); }
+  .notion-actions > button { flex: 1 1 140px; }
+  .notion-item { padding: 9px 10px; }
+}
+@media (max-width: 520px) { .notion-facts { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { .notion-panel * { transition: none !important; animation: none !important; } }

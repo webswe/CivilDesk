@@ -17,7 +17,13 @@ fn clean(text: &str, max: usize, keep_newlines: bool) -> String {
     let mut out: String = text
         .chars()
         .filter(|c| !c.is_control() || (keep_newlines && (*c == '\n')))
-        .map(|c| if !keep_newlines && c == '\u{2028}' { ' ' } else { c })
+        .map(|c| {
+            if !keep_newlines && c == '\u{2028}' {
+                ' '
+            } else {
+                c
+            }
+        })
         .collect();
     if out.chars().count() > max {
         out = out.chars().take(max).collect::<String>() + "\u{2026}";
@@ -30,11 +36,22 @@ fn s<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
 }
 
 fn plain(rich: &Value) -> String {
-    rich.as_array().map(|items| items.iter().filter_map(|i| s(i, "plain_text")).collect::<String>()).unwrap_or_default()
+    rich.as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|i| s(i, "plain_text"))
+                .collect::<String>()
+        })
+        .unwrap_or_default()
 }
 
 fn is_trashed(v: &Value) -> bool {
-    v.get("in_trash").and_then(Value::as_bool).unwrap_or(false) || v.get("is_archived").and_then(Value::as_bool).unwrap_or(false) || v.get("archived").and_then(Value::as_bool).unwrap_or(false)
+    v.get("in_trash").and_then(Value::as_bool).unwrap_or(false)
+        || v.get("is_archived")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        || v.get("archived").and_then(Value::as_bool).unwrap_or(false)
 }
 
 /// Only a single emoji-like icon is surfaced; external or file icons are never loaded.
@@ -48,7 +65,11 @@ fn emoji_icon(v: &Value) -> Option<String> {
 
 fn page_title(page: &Value) -> Option<String> {
     let props = page.get("properties")?.as_object()?;
-    props.values().find(|p| s(p, "type") == Some("title")).map(|p| clean(&plain(&p["title"]), NAME_MAX, false)).filter(|t| !t.is_empty())
+    props
+        .values()
+        .find(|p| s(p, "type") == Some("title"))
+        .map(|p| clean(&plain(&p["title"]), NAME_MAX, false))
+        .filter(|t| !t.is_empty())
 }
 
 // ------------------------------------------------------------------ connection identity
@@ -66,8 +87,16 @@ pub fn parse_me(v: &Value) -> Result<BotInfo, NotionError> {
         return Err(NotionError::invalid_response());
     }
     let bot = v.get("bot");
-    let text = |o: Option<&Value>, k: &str| o.and_then(|o| s(o, k)).map(|t| clean(t, NAME_MAX, false)).filter(|t| !t.is_empty());
-    Ok(BotInfo { bot_name: text(Some(v), "name"), workspace_id: text(bot, "workspace_id"), workspace_name: text(bot, "workspace_name") })
+    let text = |o: Option<&Value>, k: &str| {
+        o.and_then(|o| s(o, k))
+            .map(|t| clean(t, NAME_MAX, false))
+            .filter(|t| !t.is_empty())
+    };
+    Ok(BotInfo {
+        bot_name: text(Some(v), "name"),
+        workspace_id: text(bot, "workspace_id"),
+        workspace_name: text(bot, "workspace_name"),
+    })
 }
 
 // ------------------------------------------------------------------ discovery
@@ -113,15 +142,28 @@ pub fn parse_resource(item: &Value) -> Option<ResourceSummary> {
     let (name, database_id) = if kind == "page" {
         (page_title(item), None)
     } else {
-        let t = item.get("title").map(plain).map(|t| clean(&t, NAME_MAX, false)).filter(|t| !t.is_empty());
-        let db = item.get("parent").and_then(|p| s(p, "database_id")).and_then(|d| normalize_id(d).ok());
+        let t = item
+            .get("title")
+            .map(plain)
+            .map(|t| clean(&t, NAME_MAX, false))
+            .filter(|t| !t.is_empty());
+        let db = item
+            .get("parent")
+            .and_then(|p| s(p, "database_id"))
+            .and_then(|d| normalize_id(d).ok());
         (t, db)
     };
     let untitled = name.is_none();
     Some(ResourceSummary {
         id,
         resource_type: kind.to_string(),
-        name: name.unwrap_or_else(|| if kind == "page" { "Untitled page".into() } else { "Untitled data source".into() }),
+        name: name.unwrap_or_else(|| {
+            if kind == "page" {
+                "Untitled page".into()
+            } else {
+                "Untitled data source".into()
+            }
+        }),
         untitled,
         database_id,
         last_edited: s(item, "last_edited_time").map(|t| clean(t, 40, false)),
@@ -130,11 +172,23 @@ pub fn parse_resource(item: &Value) -> Option<ResourceSummary> {
 }
 
 pub fn parse_search(v: &Value) -> Result<DiscoveryPage, NotionError> {
-    let results = v.get("results").and_then(Value::as_array).ok_or_else(NotionError::invalid_response)?;
+    let results = v
+        .get("results")
+        .and_then(Value::as_array)
+        .ok_or_else(NotionError::invalid_response)?;
     let mut seen = HashSet::new();
-    let items = results.iter().filter_map(parse_resource).filter(|r| seen.insert(r.id.clone())).collect();
+    let items = results
+        .iter()
+        .filter_map(parse_resource)
+        .filter(|r| seen.insert(r.id.clone()))
+        .collect();
     let (next_cursor, has_more, incomplete) = list_meta(v);
-    Ok(DiscoveryPage { items, next_cursor, has_more, incomplete })
+    Ok(DiscoveryPage {
+        items,
+        next_cursor,
+        has_more,
+        incomplete,
+    })
 }
 
 // ------------------------------------------------------------------ databases and data sources
@@ -159,7 +213,12 @@ pub fn parse_database(v: &Value) -> Result<DatabaseView, NotionError> {
         return Err(NotionError::invalid_response());
     }
     let id = normalize_id(s(v, "id").unwrap_or_default())?;
-    let name = v.get("title").map(plain).map(|t| clean(&t, NAME_MAX, false)).filter(|t| !t.is_empty()).unwrap_or_else(|| "Untitled database".into());
+    let name = v
+        .get("title")
+        .map(plain)
+        .map(|t| clean(&t, NAME_MAX, false))
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| "Untitled database".into());
     let mut seen = HashSet::new();
     let data_sources = v
         .get("data_sources")
@@ -168,7 +227,10 @@ pub fn parse_database(v: &Value) -> Result<DatabaseView, NotionError> {
             a.iter()
                 .filter_map(|d| {
                     let id = normalize_id(s(d, "id")?).ok()?;
-                    seen.insert(id.clone()).then(|| DataSourceRef { id, name: clean(s(d, "name").unwrap_or(""), NAME_MAX, false) })
+                    seen.insert(id.clone()).then(|| DataSourceRef {
+                        id,
+                        name: clean(s(d, "name").unwrap_or(""), NAME_MAX, false),
+                    })
                 })
                 .map(|mut d| {
                     if d.name.is_empty() {
@@ -179,7 +241,11 @@ pub fn parse_database(v: &Value) -> Result<DatabaseView, NotionError> {
                 .collect()
         })
         .unwrap_or_default();
-    Ok(DatabaseView { id, name, data_sources })
+    Ok(DatabaseView {
+        id,
+        name,
+        data_sources,
+    })
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -203,7 +269,26 @@ pub struct DataSourceView {
 
 /// Property kinds the preview renders as real values. Every other kind is shown as "unsupported", never as blank.
 const SUPPORTED: &[&str] = &[
-    "title", "rich_text", "number", "select", "multi_select", "status", "date", "checkbox", "url", "email", "phone_number", "created_time", "last_edited_time", "unique_id", "people", "created_by", "last_edited_by", "formula", "relation", "files",
+    "title",
+    "rich_text",
+    "number",
+    "select",
+    "multi_select",
+    "status",
+    "date",
+    "checkbox",
+    "url",
+    "email",
+    "phone_number",
+    "created_time",
+    "last_edited_time",
+    "unique_id",
+    "people",
+    "created_by",
+    "last_edited_by",
+    "formula",
+    "relation",
+    "files",
 ];
 
 pub fn parse_data_source(v: &Value) -> Result<DataSourceView, NotionError> {
@@ -211,7 +296,11 @@ pub fn parse_data_source(v: &Value) -> Result<DataSourceView, NotionError> {
         return Err(NotionError::invalid_response());
     }
     let id = normalize_id(s(v, "id").unwrap_or_default())?;
-    let title = v.get("title").map(plain).map(|t| clean(&t, NAME_MAX, false)).filter(|t| !t.is_empty());
+    let title = v
+        .get("title")
+        .map(plain)
+        .map(|t| clean(&t, NAME_MAX, false))
+        .filter(|t| !t.is_empty());
     let mut properties: Vec<PropertySchema> = v
         .get("properties")
         .and_then(Value::as_object)
@@ -219,8 +308,24 @@ pub fn parse_data_source(v: &Value) -> Result<DataSourceView, NotionError> {
             m.iter()
                 .map(|(name, p)| {
                     let kind = s(p, "type").unwrap_or("unknown").to_string();
-                    let options = p.get(&kind).and_then(|c| c.get("options")).and_then(Value::as_array).map(|o| o.iter().filter_map(|x| s(x, "name")).map(|n| clean(n, 80, false)).take(50).collect()).unwrap_or_default();
-                    PropertySchema { name: clean(name, NAME_MAX, false), supported: SUPPORTED.contains(&kind.as_str()), kind, options }
+                    let options = p
+                        .get(&kind)
+                        .and_then(|c| c.get("options"))
+                        .and_then(Value::as_array)
+                        .map(|o| {
+                            o.iter()
+                                .filter_map(|x| s(x, "name"))
+                                .map(|n| clean(n, 80, false))
+                                .take(50)
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    PropertySchema {
+                        name: clean(name, NAME_MAX, false),
+                        supported: SUPPORTED.contains(&kind.as_str()),
+                        kind,
+                        options,
+                    }
                 })
                 .collect()
         })
@@ -230,7 +335,10 @@ pub fn parse_data_source(v: &Value) -> Result<DataSourceView, NotionError> {
         id,
         untitled: title.is_none(),
         name: title.unwrap_or_else(|| "Untitled data source".into()),
-        database_id: v.get("parent").and_then(|p| s(p, "database_id")).and_then(|d| normalize_id(d).ok()),
+        database_id: v
+            .get("parent")
+            .and_then(|p| s(p, "database_id"))
+            .and_then(|d| normalize_id(d).ok()),
         properties,
     })
 }
@@ -260,18 +368,35 @@ fn date_text(d: &Value) -> String {
 }
 
 fn number_text(n: &Value) -> String {
-    n.as_f64().map(|f| if f.fract() == 0.0 && f.abs() < 1e15 { format!("{}", f as i64) } else { format!("{f}") }).unwrap_or_default()
+    n.as_f64()
+        .map(|f| {
+            if f.fract() == 0.0 && f.abs() < 1e15 {
+                format!("{}", f as i64)
+            } else {
+                format!("{f}")
+            }
+        })
+        .unwrap_or_default()
 }
 
 fn people_text(list: &Value) -> String {
     let arr = list.as_array().cloned().unwrap_or_default();
-    let names: Vec<String> = arr.iter().filter_map(|p| s(p, "name")).map(|n| clean(n, 80, false)).filter(|n| !n.is_empty()).collect();
+    let names: Vec<String> = arr
+        .iter()
+        .filter_map(|p| s(p, "name"))
+        .map(|n| clean(n, 80, false))
+        .filter(|n| !n.is_empty())
+        .collect();
     if names.len() == arr.len() && !names.is_empty() {
         names.join(", ")
     } else if arr.is_empty() {
         String::new()
     } else {
-        format!("{} {}", arr.len(), if arr.len() == 1 { "person" } else { "people" })
+        format!(
+            "{} {}",
+            arr.len(),
+            if arr.len() == 1 { "person" } else { "people" }
+        )
     }
 }
 
@@ -285,18 +410,59 @@ pub fn parse_cell(name: &str, prop: &Value) -> Cell {
         "number" => number_text(&value),
         "select" | "status" => s(&value, "name").unwrap_or("").to_string(),
         "multi_select" => {
-            tags = value.as_array().map(|a| a.iter().filter_map(|o| s(o, "name")).map(|n| clean(n, 60, false)).collect()).unwrap_or_default();
+            tags = value
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|o| s(o, "name"))
+                        .map(|n| clean(n, 60, false))
+                        .collect()
+                })
+                .unwrap_or_default();
             String::new()
         }
         "date" => date_text(&value),
-        "checkbox" => value.as_bool().map(|b| if b { "Yes".to_string() } else { "No".to_string() }).unwrap_or_default(),
-        "url" | "email" | "phone_number" | "created_time" | "last_edited_time" => value.as_str().unwrap_or("").to_string(),
-        "unique_id" => format!("{}{}", s(&value, "prefix").map(|p| format!("{p}-")).unwrap_or_default(), value.get("number").map(number_text).unwrap_or_default()).trim_end_matches('-').to_string(),
-        "people" | "created_by" | "last_edited_by" => people_text(&if value.is_array() { value } else { Value::Array(vec![value]) }),
+        "checkbox" => value
+            .as_bool()
+            .map(|b| {
+                if b {
+                    "Yes".to_string()
+                } else {
+                    "No".to_string()
+                }
+            })
+            .unwrap_or_default(),
+        "url" | "email" | "phone_number" | "created_time" | "last_edited_time" => {
+            value.as_str().unwrap_or("").to_string()
+        }
+        "unique_id" => format!(
+            "{}{}",
+            s(&value, "prefix")
+                .map(|p| format!("{p}-"))
+                .unwrap_or_default(),
+            value.get("number").map(number_text).unwrap_or_default()
+        )
+        .trim_end_matches('-')
+        .to_string(),
+        "people" | "created_by" | "last_edited_by" => people_text(&if value.is_array() {
+            value
+        } else {
+            Value::Array(vec![value])
+        }),
         "formula" => match s(&value, "type") {
             Some("string") => s(&value, "string").unwrap_or("").to_string(),
             Some("number") => value.get("number").map(number_text).unwrap_or_default(),
-            Some("boolean") => value.get("boolean").and_then(Value::as_bool).map(|b| if b { "Yes".to_string() } else { "No".to_string() }).unwrap_or_default(),
+            Some("boolean") => value
+                .get("boolean")
+                .and_then(Value::as_bool)
+                .map(|b| {
+                    if b {
+                        "Yes".to_string()
+                    } else {
+                        "No".to_string()
+                    }
+                })
+                .unwrap_or_default(),
             Some("date") => value.get("date").map(date_text).unwrap_or_default(),
             _ => {
                 supported = false;
@@ -305,11 +471,22 @@ pub fn parse_cell(name: &str, prop: &Value) -> Cell {
         },
         "relation" => {
             let n = value.as_array().map(Vec::len).unwrap_or(0);
-            if n == 0 { String::new() } else { format!("{n} linked {}", if n == 1 { "item" } else { "items" }) }
+            if n == 0 {
+                String::new()
+            } else {
+                format!("{n} linked {}", if n == 1 { "item" } else { "items" })
+            }
         }
         "files" => {
             let n = value.as_array().map(Vec::len).unwrap_or(0);
-            if n == 0 { String::new() } else { format!("{n} {} (not downloaded)", if n == 1 { "file" } else { "files" }) }
+            if n == 0 {
+                String::new()
+            } else {
+                format!(
+                    "{n} {} (not downloaded)",
+                    if n == 1 { "file" } else { "files" }
+                )
+            }
         }
         _ => String::new(),
     };
@@ -318,7 +495,14 @@ pub fn parse_cell(name: &str, prop: &Value) -> Cell {
     }
     let text = clean(&text, CELL_MAX, false);
     let empty = supported && text.is_empty() && tags.is_empty();
-    Cell { name: clean(name, NAME_MAX, false), kind, text, tags, empty, supported }
+    Cell {
+        name: clean(name, NAME_MAX, false),
+        kind,
+        text,
+        tags,
+        empty,
+        supported,
+    }
 }
 
 // ------------------------------------------------------------------ entries and pages
@@ -342,26 +526,45 @@ pub struct EntriesPage {
 }
 
 fn cells_for(page: &Value) -> Vec<Cell> {
-    let Some(props) = page.get("properties").and_then(Value::as_object) else { return Vec::new() };
-    let mut cells: Vec<Cell> = props.iter().map(|(n, p)| parse_cell(n, p)).filter(|c| c.kind != "title").collect();
+    let Some(props) = page.get("properties").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    let mut cells: Vec<Cell> = props
+        .iter()
+        .map(|(n, p)| parse_cell(n, p))
+        .filter(|c| c.kind != "title")
+        .collect();
     cells.sort_by_key(|c| (!c.supported, c.name.to_lowercase()));
     cells.truncate(MAX_CELLS - 1);
     cells
 }
 
 pub fn parse_entries(v: &Value) -> Result<EntriesPage, NotionError> {
-    let results = v.get("results").and_then(Value::as_array).ok_or_else(NotionError::invalid_response)?;
+    let results = v
+        .get("results")
+        .and_then(Value::as_array)
+        .ok_or_else(NotionError::invalid_response)?;
     let mut seen = HashSet::new();
     let rows = results
         .iter()
         .filter(|p| s(p, "object") == Some("page") && !is_trashed(p))
         .filter_map(|p| {
             let id = normalize_id(s(p, "id")?).ok()?;
-            seen.insert(id.clone()).then(|| EntryRow { id, title: page_title(p).unwrap_or_else(|| "Untitled".into()), last_edited: s(p, "last_edited_time").map(|t| clean(t, 40, false)), cells: cells_for(p) })
+            seen.insert(id.clone()).then(|| EntryRow {
+                id,
+                title: page_title(p).unwrap_or_else(|| "Untitled".into()),
+                last_edited: s(p, "last_edited_time").map(|t| clean(t, 40, false)),
+                cells: cells_for(p),
+            })
         })
         .collect();
     let (next_cursor, has_more, incomplete) = list_meta(v);
-    Ok(EntriesPage { rows, next_cursor, has_more, incomplete })
+    Ok(EntriesPage {
+        rows,
+        next_cursor,
+        has_more,
+        incomplete,
+    })
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -388,7 +591,11 @@ pub fn parse_page(v: &Value) -> Result<PageView, NotionError> {
         title: title.unwrap_or_else(|| "Untitled page".into()),
         created: s(v, "created_time").map(|t| clean(t, 40, false)),
         last_edited: s(v, "last_edited_time").map(|t| clean(t, 40, false)),
-        parent_kind: v.get("parent").and_then(|p| s(p, "type")).map(|t| clean(t, 40, false)).unwrap_or_else(|| "unknown".into()),
+        parent_kind: v
+            .get("parent")
+            .and_then(|p| s(p, "type"))
+            .map(|t| clean(t, 40, false))
+            .unwrap_or_else(|| "unknown".into()),
         properties: cells_for(v),
     })
 }
@@ -427,7 +634,10 @@ pub fn parse_block(b: &Value) -> Option<BlockView> {
     let mut language = None;
     let mut supported = true;
     let text = match kind.as_str() {
-        "paragraph" | "heading_1" | "heading_2" | "heading_3" | "heading_4" | "bulleted_list_item" | "numbered_list_item" | "quote" | "toggle" | "callout" => rich("rich_text"),
+        "paragraph" | "heading_1" | "heading_2" | "heading_3" | "heading_4"
+        | "bulleted_list_item" | "numbered_list_item" | "quote" | "toggle" | "callout" => {
+            rich("rich_text")
+        }
         "to_do" => {
             checked = body.get("checked").and_then(Value::as_bool);
             rich("rich_text")
@@ -440,24 +650,51 @@ pub fn parse_block(b: &Value) -> Option<BlockView> {
         "divider" => String::new(),
         "child_page" | "child_database" => clean(s(&body, "title").unwrap_or(""), NAME_MAX, false),
         // Links are shown as inert text. Attachments and embeds are never fetched or rendered.
-        "bookmark" | "embed" | "link_preview" => clean(s(&body, "url").unwrap_or(""), CELL_MAX, false),
+        "bookmark" | "embed" | "link_preview" => {
+            clean(s(&body, "url").unwrap_or(""), CELL_MAX, false)
+        }
         "image" | "file" | "pdf" | "video" | "audio" => {
             let caption = rich("caption");
-            format!("Attachment not downloaded{}", if caption.is_empty() { String::new() } else { format!(": {caption}") })
+            format!(
+                "Attachment not downloaded{}",
+                if caption.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {caption}")
+                }
+            )
         }
         _ => {
             supported = false;
             format!("Unsupported block ({})", clean(&kind, 40, false))
         }
     };
-    Some(BlockView { id, kind, text, checked, language, has_children: b.get("has_children").and_then(Value::as_bool).unwrap_or(false), supported })
+    Some(BlockView {
+        id,
+        kind,
+        text,
+        checked,
+        language,
+        has_children: b
+            .get("has_children")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        supported,
+    })
 }
 
 pub fn parse_blocks(v: &Value) -> Result<BlocksPage, NotionError> {
-    let results = v.get("results").and_then(Value::as_array).ok_or_else(NotionError::invalid_response)?;
+    let results = v
+        .get("results")
+        .and_then(Value::as_array)
+        .ok_or_else(NotionError::invalid_response)?;
     let blocks = results.iter().filter_map(parse_block).collect();
     let (next_cursor, has_more, _) = list_meta(v);
-    Ok(BlocksPage { blocks, next_cursor, has_more })
+    Ok(BlocksPage {
+        blocks,
+        next_cursor,
+        has_more,
+    })
 }
 
 #[cfg(test)]
@@ -474,7 +711,14 @@ mod tests {
         let me = parse_me(&v).unwrap();
         assert_eq!(me.workspace_name.as_deref(), Some("Lab"));
         let empty_bot = parse_me(&json!({"object":"user","id":A,"type":"bot","bot":{}})).unwrap();
-        assert_eq!(empty_bot, BotInfo { bot_name: None, workspace_id: None, workspace_name: None });
+        assert_eq!(
+            empty_bot,
+            BotInfo {
+                bot_name: None,
+                workspace_id: None,
+                workspace_name: None
+            }
+        );
         assert!(parse_me(&json!({"object":"user","type":"person"})).is_err());
         assert!(parse_me(&json!({"object":"error"})).is_err());
     }
@@ -492,10 +736,25 @@ mod tests {
             {"object":"page","id":"77777777-7777-7777-7777-777777777777"}
         ]});
         let p = parse_search(&v).unwrap();
-        let names: Vec<_> = p.items.iter().map(|i| (i.resource_type.as_str(), i.name.as_str())).collect();
-        assert_eq!(names, vec![("page", "Notes"), ("data_source", "Assignments"), ("data_source", "Untitled data source"), ("page", "Untitled page")]);
+        let names: Vec<_> = p
+            .items
+            .iter()
+            .map(|i| (i.resource_type.as_str(), i.name.as_str()))
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                ("page", "Notes"),
+                ("data_source", "Assignments"),
+                ("data_source", "Untitled data source"),
+                ("page", "Untitled page")
+            ]
+        );
         assert_eq!(p.items[0].icon.as_deref(), Some("📘"));
-        assert_eq!(p.items[1].database_id.as_deref(), Some("33333333-3333-3333-3333-333333333333"));
+        assert_eq!(
+            p.items[1].database_id.as_deref(),
+            Some("33333333-3333-3333-3333-333333333333")
+        );
         assert!(p.items[2].untitled);
         assert!(p.has_more);
         assert_eq!(p.next_cursor.as_deref(), Some("cur-2"));
@@ -515,7 +774,13 @@ mod tests {
         let d = parse_database(&v).unwrap();
         assert_eq!(d.id, A);
         assert_eq!(d.data_sources.len(), 2);
-        assert_eq!(d.data_sources[0], DataSourceRef { id: B.into(), name: "Main".into() });
+        assert_eq!(
+            d.data_sources[0],
+            DataSourceRef {
+                id: B.into(),
+                name: "Main".into()
+            }
+        );
         assert_eq!(d.data_sources[1].name, "Untitled data source");
         assert_ne!(d.id, d.data_sources[0].id);
         assert!(parse_database(&json!({"object":"data_source","id":A})).is_err());
@@ -535,34 +800,82 @@ mod tests {
         assert_eq!(d.properties[0].kind, "title");
         let status = d.properties.iter().find(|p| p.name == "Status").unwrap();
         assert_eq!(status.options, vec!["Todo", "Done"]);
-        assert!(!d.properties.iter().find(|p| p.name == "Go").unwrap().supported);
-        assert!(!d.properties.iter().find(|p| p.name == "Rollup").unwrap().supported);
+        assert!(
+            !d.properties
+                .iter()
+                .find(|p| p.name == "Go")
+                .unwrap()
+                .supported
+        );
+        assert!(
+            !d.properties
+                .iter()
+                .find(|p| p.name == "Rollup")
+                .unwrap()
+                .supported
+        );
     }
 
     #[test]
     fn cells_render_supported_types() {
         let c = |p: Value| parse_cell("P", &p);
-        assert_eq!(c(json!({"type":"rich_text","rich_text":[{"plain_text":"a"},{"plain_text":"b"}]})).text, "ab");
+        assert_eq!(
+            c(json!({"type":"rich_text","rich_text":[{"plain_text":"a"},{"plain_text":"b"}]})).text,
+            "ab"
+        );
         assert_eq!(c(json!({"type":"number","number":3.0})).text, "3");
         assert_eq!(c(json!({"type":"number","number":2.5})).text, "2.5");
-        assert_eq!(c(json!({"type":"select","select":{"name":"High"}})).text, "High");
-        assert_eq!(c(json!({"type":"status","status":{"name":"Done"}})).text, "Done");
-        assert_eq!(c(json!({"type":"multi_select","multi_select":[{"name":"x"},{"name":"y"}]})).tags, vec!["x", "y"]);
-        assert_eq!(c(json!({"type":"date","date":{"start":"2026-02-01","end":"2026-02-03"}})).text, "2026-02-01 \u{2192} 2026-02-03");
+        assert_eq!(
+            c(json!({"type":"select","select":{"name":"High"}})).text,
+            "High"
+        );
+        assert_eq!(
+            c(json!({"type":"status","status":{"name":"Done"}})).text,
+            "Done"
+        );
+        assert_eq!(
+            c(json!({"type":"multi_select","multi_select":[{"name":"x"},{"name":"y"}]})).tags,
+            vec!["x", "y"]
+        );
+        assert_eq!(
+            c(json!({"type":"date","date":{"start":"2026-02-01","end":"2026-02-03"}})).text,
+            "2026-02-01 \u{2192} 2026-02-03"
+        );
         assert_eq!(c(json!({"type":"checkbox","checkbox":true})).text, "Yes");
-        assert_eq!(c(json!({"type":"unique_id","unique_id":{"prefix":"TASK","number":7}})).text, "TASK-7");
-        assert_eq!(c(json!({"type":"people","people":[{"name":"Ada"},{"name":"Lin"}]})).text, "Ada, Lin");
-        assert_eq!(c(json!({"type":"people","people":[{"id":A},{"id":B}]})).text, "2 people");
-        assert_eq!(c(json!({"type":"relation","relation":[{"id":A}]})).text, "1 linked item");
-        assert_eq!(c(json!({"type":"files","files":[{"name":"x"}]})).text, "1 file (not downloaded)");
-        assert_eq!(c(json!({"type":"formula","formula":{"type":"number","number":4}})).text, "4");
+        assert_eq!(
+            c(json!({"type":"unique_id","unique_id":{"prefix":"TASK","number":7}})).text,
+            "TASK-7"
+        );
+        assert_eq!(
+            c(json!({"type":"people","people":[{"name":"Ada"},{"name":"Lin"}]})).text,
+            "Ada, Lin"
+        );
+        assert_eq!(
+            c(json!({"type":"people","people":[{"id":A},{"id":B}]})).text,
+            "2 people"
+        );
+        assert_eq!(
+            c(json!({"type":"relation","relation":[{"id":A}]})).text,
+            "1 linked item"
+        );
+        assert_eq!(
+            c(json!({"type":"files","files":[{"name":"x"}]})).text,
+            "1 file (not downloaded)"
+        );
+        assert_eq!(
+            c(json!({"type":"formula","formula":{"type":"number","number":4}})).text,
+            "4"
+        );
     }
 
     #[test]
     fn empty_and_unsupported_values_are_distinguished() {
         let empty = parse_cell("D", &json!({"type":"date","date":null}));
         assert!(empty.empty && empty.supported);
-        let unsupported = parse_cell("R", &json!({"type":"rollup","rollup":{"type":"number","number":4}}));
+        let unsupported = parse_cell(
+            "R",
+            &json!({"type":"rollup","rollup":{"type":"number","number":4}}),
+        );
         assert!(!unsupported.supported && !unsupported.empty);
         assert_eq!(unsupported.text, "Unsupported property type (rollup)");
         let weird = parse_cell("W", &json!({"type":"brand_new_type","brand_new_type":{}}));
@@ -610,7 +923,10 @@ mod tests {
         assert_eq!(b[0].text, "Title");
         assert_eq!(b[1].checked, Some(true));
         assert_eq!(b[2].text, "Attachment not downloaded: Diagram");
-        assert!(!format!("{b:?}").contains("SECRET"), "signed attachment URLs are dropped");
+        assert!(
+            !format!("{b:?}").contains("SECRET"),
+            "signed attachment URLs are dropped"
+        );
         assert!(!b[3].supported && b[3].text.contains("table"));
         assert_eq!(b[4].text, "https://example.com");
         assert_eq!(b[5].language.as_deref(), Some("python"));
@@ -622,7 +938,10 @@ mod tests {
         let v = json!({"object":"page","id":A,"properties":{"Name":{"type":"title","title":[{"plain_text":evil}]}}});
         let p = parse_page(&v).unwrap();
         assert!(!p.title.contains('\u{0007}') && !p.title.contains('\u{0000}'));
-        assert!(p.title.contains("<script>"), "kept as inert text; the UI renders text nodes only");
+        assert!(
+            p.title.contains("<script>"),
+            "kept as inert text; the UI renders text nodes only"
+        );
         let long = "x".repeat(5000);
         let v = json!({"object":"page","id":A,"properties":{"Name":{"type":"title","title":[{"plain_text":long}]}}});
         assert!(parse_page(&v).unwrap().title.chars().count() <= NAME_MAX + 1);

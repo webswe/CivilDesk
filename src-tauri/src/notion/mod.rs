@@ -10,8 +10,11 @@ pub mod parse;
 pub mod secrets;
 
 use crate::persistence::Database;
-use client::{CancelSource, Client, ClientConfig, ErrorKind, NotionError, ReadOp, ReqwestTransport, SearchKind, API_VERSION};
-use parse::{BlocksPage, DatabaseView, DataSourceView, DiscoveryPage, EntriesPage, PageView};
+use client::{
+    CancelSource, Client, ClientConfig, ErrorKind, NotionError, ReadOp, ReqwestTransport,
+    SearchKind, API_VERSION,
+};
+use parse::{BlocksPage, DataSourceView, DatabaseView, DiscoveryPage, EntriesPage, PageView};
 use rusqlite::{params, Connection, OptionalExtension};
 use secrets::{CredentialManagerStore, Secret, SecretStore};
 use serde::Serialize;
@@ -44,7 +47,10 @@ pub struct SelectedSource {
 }
 
 fn now_ms() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 fn db_err(_: rusqlite::Error) -> NotionError {
@@ -61,12 +67,26 @@ pub struct NotionService {
 impl NotionService {
     /// The production service: Credential Manager scoped to this build's identity, real HTTPS transport.
     pub fn production(identifier: &str) -> Self {
-        let client = ReqwestTransport::new().map(|t| Arc::new(Client::new(Arc::new(t), ClientConfig::production())));
-        Self::new(identifier, Box::new(CredentialManagerStore::for_identity(identifier)), client)
+        let client = ReqwestTransport::new()
+            .map(|t| Arc::new(Client::new(Arc::new(t), ClientConfig::production())));
+        Self::new(
+            identifier,
+            Box::new(CredentialManagerStore::for_identity(identifier)),
+            client,
+        )
     }
 
-    pub fn new(identifier: &str, secrets: Box<dyn SecretStore>, client: Result<Arc<Client>, String>) -> Self {
-        Self { secrets, client, cancel: CancelSource::default(), identifier: identifier.to_string() }
+    pub fn new(
+        identifier: &str,
+        secrets: Box<dyn SecretStore>,
+        client: Result<Arc<Client>, String>,
+    ) -> Self {
+        Self {
+            secrets,
+            client,
+            cancel: CancelSource::default(),
+            identifier: identifier.to_string(),
+        }
     }
 
     /// Abandons in-flight requests and any retry waits. Used by the UI when a dialog closes, and on disconnect.
@@ -83,7 +103,10 @@ impl NotionService {
     }
 
     fn call_with(&self, token: &Secret, op: &ReadOp) -> Result<serde_json::Value, NotionError> {
-        let client = self.client.as_ref().map_err(|m| NotionError::new(ErrorKind::Unavailable, m.clone()))?;
+        let client = self
+            .client
+            .as_ref()
+            .map_err(|m| NotionError::new(ErrorKind::Unavailable, m.clone()))?;
         client.call(op, token, &self.cancel.token())
     }
 
@@ -92,7 +115,9 @@ impl NotionService {
         let token = self.token()?;
         match self.call_with(&token, &op) {
             Err(e) if matches!(e.kind, ErrorKind::AuthFailed) => {
-                let conn = db.0.lock().map_err(|_| NotionError::storage("Local data is busy."))?;
+                let conn =
+                    db.0.lock()
+                        .map_err(|_| NotionError::storage("Local data is busy."))?;
                 let _ = store::set_state(&conn, "auth_failed");
                 Err(e)
             }
@@ -104,10 +129,22 @@ impl NotionService {
 
     /// Local only: no network. "connected" means the last verification succeeded and a credential is still stored.
     pub fn status(&self, db: &Database) -> Result<ConnectionStatus, NotionError> {
-        let conn = db.0.lock().map_err(|_| NotionError::storage("Local data is busy."))?;
+        let conn =
+            db.0.lock()
+                .map_err(|_| NotionError::storage("Local data is busy."))?;
         let row = store::connection(&conn).map_err(db_err)?;
         let selected_count = store::selected_count(&conn).map_err(db_err)?;
-        let mut status = ConnectionStatus { state: "not_connected".into(), workspace_name: None, bot_name: None, connected_at_ms: None, last_verified_at_ms: None, selected_count, read_only: true, api_version: API_VERSION.into(), message: None };
+        let mut status = ConnectionStatus {
+            state: "not_connected".into(),
+            workspace_name: None,
+            bot_name: None,
+            connected_at_ms: None,
+            last_verified_at_ms: None,
+            selected_count,
+            read_only: true,
+            api_version: API_VERSION.into(),
+            message: None,
+        };
         match self.secrets.get() {
             Ok(Some(_)) => {
                 if let Some(r) = row {
@@ -148,9 +185,13 @@ impl NotionService {
         let secret = Secret::new(trimmed);
         let me = self.call_with(&secret, &ReadOp::Me)?;
         let bot = parse::parse_me(&me)?;
-        self.secrets.set(&secret).map_err(|secrets::SecretError::Unavailable(m)| NotionError::storage(m))?;
+        self.secrets
+            .set(&secret)
+            .map_err(|secrets::SecretError::Unavailable(m)| NotionError::storage(m))?;
         {
-            let conn = db.0.lock().map_err(|_| NotionError::storage("Local data is busy."))?;
+            let conn =
+                db.0.lock()
+                    .map_err(|_| NotionError::storage("Local data is busy."))?;
             store::upsert_connection(&conn, &self.identifier, &bot, now_ms()).map_err(db_err)?;
         }
         self.status(db)
@@ -159,11 +200,17 @@ impl NotionService {
     /// A user-initiated read-only verification. Network trouble leaves the last known state untouched.
     pub fn check(&self, db: &Database) -> Result<ConnectionStatus, NotionError> {
         let token = self.token()?;
-        match self.call_with(&token, &ReadOp::Me).and_then(|v| parse::parse_me(&v)) {
+        match self
+            .call_with(&token, &ReadOp::Me)
+            .and_then(|v| parse::parse_me(&v))
+        {
             Ok(bot) => {
                 {
-                    let conn = db.0.lock().map_err(|_| NotionError::storage("Local data is busy."))?;
-                    store::upsert_connection(&conn, &self.identifier, &bot, now_ms()).map_err(db_err)?;
+                    let conn =
+                        db.0.lock()
+                            .map_err(|_| NotionError::storage("Local data is busy."))?;
+                    store::upsert_connection(&conn, &self.identifier, &bot, now_ms())
+                        .map_err(db_err)?;
                 }
                 self.status(db)
             }
@@ -174,7 +221,9 @@ impl NotionService {
                     _ => None,
                 };
                 if let Some(state) = state {
-                    let conn = db.0.lock().map_err(|_| NotionError::storage("Local data is busy."))?;
+                    let conn =
+                        db.0.lock()
+                            .map_err(|_| NotionError::storage("Local data is busy."))?;
                     store::set_state(&conn, state).map_err(db_err)?;
                 }
                 Err(e)
@@ -186,9 +235,13 @@ impl NotionService {
     /// This does not revoke the connection inside Notion.
     pub fn disconnect(&self, db: &Database) -> Result<ConnectionStatus, NotionError> {
         self.cancel.cancel();
-        self.secrets.delete().map_err(|secrets::SecretError::Unavailable(m)| NotionError::storage(m))?;
+        self.secrets
+            .delete()
+            .map_err(|secrets::SecretError::Unavailable(m)| NotionError::storage(m))?;
         {
-            let conn = db.0.lock().map_err(|_| NotionError::storage("Local data is busy."))?;
+            let conn =
+                db.0.lock()
+                    .map_err(|_| NotionError::storage("Local data is busy."))?;
             store::clear(&conn).map_err(db_err)?;
         }
         self.status(db)
@@ -196,27 +249,49 @@ impl NotionService {
 
     // -------------------------------------------------------------- browsing (all reads)
 
-    pub fn search(&self, db: &Database, query: Option<String>, kind: Option<String>, cursor: Option<String>) -> Result<DiscoveryPage, NotionError> {
+    pub fn search(
+        &self,
+        db: &Database,
+        query: Option<String>,
+        kind: Option<String>,
+        cursor: Option<String>,
+    ) -> Result<DiscoveryPage, NotionError> {
         let kind = match kind.as_deref() {
             None | Some("") | Some("all") => None,
             Some("page") => Some(SearchKind::Page),
             Some("data_source") => Some(SearchKind::DataSource),
             Some(_) => return Err(NotionError::invalid("Unknown resource type.")),
         };
-        parse::parse_search(&self.read(db, ReadOp::Search { query, kind, cursor })?)
+        parse::parse_search(&self.read(
+            db,
+            ReadOp::Search {
+                query,
+                kind,
+                cursor,
+            },
+        )?)
     }
 
     pub fn open_database(&self, db: &Database, id: String) -> Result<DatabaseView, NotionError> {
         parse::parse_database(&self.read(db, ReadOp::GetDatabase(id))?)
     }
 
-    pub fn open_data_source(&self, db: &Database, id: String) -> Result<DataSourceView, NotionError> {
+    pub fn open_data_source(
+        &self,
+        db: &Database,
+        id: String,
+    ) -> Result<DataSourceView, NotionError> {
         let view = parse::parse_data_source(&self.read(db, ReadOp::GetDataSource(id))?)?;
         self.refresh_selected(db, &view.id, &view.name, view.database_id.as_deref());
         Ok(view)
     }
 
-    pub fn preview_entries(&self, db: &Database, id: String, cursor: Option<String>) -> Result<EntriesPage, NotionError> {
+    pub fn preview_entries(
+        &self,
+        db: &Database,
+        id: String,
+        cursor: Option<String>,
+    ) -> Result<EntriesPage, NotionError> {
         parse::parse_entries(&self.read(db, ReadOp::QueryDataSource { id, cursor })?)
     }
 
@@ -226,7 +301,12 @@ impl NotionService {
         Ok(view)
     }
 
-    pub fn page_blocks(&self, db: &Database, id: String, cursor: Option<String>) -> Result<BlocksPage, NotionError> {
+    pub fn page_blocks(
+        &self,
+        db: &Database,
+        id: String,
+        cursor: Option<String>,
+    ) -> Result<BlocksPage, NotionError> {
         parse::parse_blocks(&self.read(db, ReadOp::BlockChildren { id, cursor })?)
     }
 
@@ -239,10 +319,18 @@ impl NotionService {
     }
 
     /// Remembers (or forgets) a source. The name and type come from Notion again, not from the caller.
-    pub fn set_source_selected(&self, db: &Database, resource_id: String, resource_type: String, selected: bool) -> Result<Vec<SelectedSource>, NotionError> {
+    pub fn set_source_selected(
+        &self,
+        db: &Database,
+        resource_id: String,
+        resource_type: String,
+        selected: bool,
+    ) -> Result<Vec<SelectedSource>, NotionError> {
         let id = client::normalize_id(&resource_id)?;
         {
-            let conn = db.0.lock().map_err(|_| NotionError::storage("Local data is busy."))?;
+            let conn =
+                db.0.lock()
+                    .map_err(|_| NotionError::storage("Local data is busy."))?;
             if store::connection(&conn).map_err(db_err)?.is_none() {
                 return Err(NotionError::not_connected());
             }
@@ -250,26 +338,46 @@ impl NotionService {
         if selected {
             let (name, database_id) = match resource_type.as_str() {
                 "data_source" => {
-                    let v = parse::parse_data_source(&self.read(db, ReadOp::GetDataSource(id.clone()))?)?;
+                    let v = parse::parse_data_source(
+                        &self.read(db, ReadOp::GetDataSource(id.clone()))?,
+                    )?;
                     (v.name, v.database_id)
                 }
                 "page" => {
                     let v = parse::parse_page(&self.read(db, ReadOp::GetPage(id.clone()))?)?;
                     (v.title, None)
                 }
-                _ => return Err(NotionError::invalid("Only pages and data sources can be remembered.")),
+                _ => {
+                    return Err(NotionError::invalid(
+                        "Only pages and data sources can be remembered.",
+                    ))
+                }
             };
-            let conn = db.0.lock().map_err(|_| NotionError::storage("Local data is busy."))?;
-            store::select_source(&conn, &id, &resource_type, &name, database_id.as_deref(), now_ms()).map_err(db_err)?;
+            let conn =
+                db.0.lock()
+                    .map_err(|_| NotionError::storage("Local data is busy."))?;
+            store::select_source(
+                &conn,
+                &id,
+                &resource_type,
+                &name,
+                database_id.as_deref(),
+                now_ms(),
+            )
+            .map_err(db_err)?;
         } else {
-            let conn = db.0.lock().map_err(|_| NotionError::storage("Local data is busy."))?;
+            let conn =
+                db.0.lock()
+                    .map_err(|_| NotionError::storage("Local data is busy."))?;
             store::deselect_source(&conn, &id).map_err(db_err)?;
         }
         self.selected_sources(db)
     }
 
     pub fn selected_sources(&self, db: &Database) -> Result<Vec<SelectedSource>, NotionError> {
-        let conn = db.0.lock().map_err(|_| NotionError::storage("Local data is busy."))?;
+        let conn =
+            db.0.lock()
+                .map_err(|_| NotionError::storage("Local data is busy."))?;
         store::selected(&conn).map_err(db_err)
     }
 }
@@ -295,10 +403,18 @@ pub mod store {
     }
 
     /// Records a successful verification. If the credential now belongs to a different workspace, old selections are dropped.
-    pub fn upsert_connection(conn: &Connection, identifier: &str, bot: &parse::BotInfo, now: i64) -> rusqlite::Result<()> {
+    pub fn upsert_connection(
+        conn: &Connection,
+        identifier: &str,
+        bot: &parse::BotInfo,
+        now: i64,
+    ) -> rusqlite::Result<()> {
         let existing = connection(conn)?;
         if let Some(old) = &existing {
-            if old.workspace_id.is_some() && bot.workspace_id.is_some() && old.workspace_id != bot.workspace_id {
+            if old.workspace_id.is_some()
+                && bot.workspace_id.is_some()
+                && old.workspace_id != bot.workspace_id
+            {
                 conn.execute("DELETE FROM notion_sources", [])?;
             }
         }
@@ -314,7 +430,10 @@ pub mod store {
     }
 
     pub fn set_state(conn: &Connection, state: &str) -> rusqlite::Result<()> {
-        conn.execute("UPDATE notion_connection SET status=?1 WHERE id='default'", [state])?;
+        conn.execute(
+            "UPDATE notion_connection SET status=?1 WHERE id='default'",
+            [state],
+        )?;
         Ok(())
     }
 
@@ -325,10 +444,21 @@ pub mod store {
     }
 
     pub fn selected_count(conn: &Connection) -> rusqlite::Result<i64> {
-        conn.query_row("SELECT COUNT(*) FROM notion_sources WHERE selected=1", [], |r| r.get(0))
+        conn.query_row(
+            "SELECT COUNT(*) FROM notion_sources WHERE selected=1",
+            [],
+            |r| r.get(0),
+        )
     }
 
-    pub fn select_source(conn: &Connection, id: &str, kind: &str, name: &str, database_id: Option<&str>, now: i64) -> rusqlite::Result<()> {
+    pub fn select_source(
+        conn: &Connection,
+        id: &str,
+        kind: &str,
+        name: &str,
+        database_id: Option<&str>,
+        now: i64,
+    ) -> rusqlite::Result<()> {
         conn.execute(
             "INSERT INTO notion_sources(connection_id, resource_id, resource_type, display_name, database_id, selected, selected_at_ms, last_verified_at_ms)
              VALUES ('default', ?1, ?2, ?3, ?4, 1, ?5, ?5)
@@ -340,19 +470,37 @@ pub mod store {
     }
 
     pub fn deselect_source(conn: &Connection, id: &str) -> rusqlite::Result<()> {
-        conn.execute("UPDATE notion_sources SET selected=0 WHERE resource_id=?1", [id])?;
+        conn.execute(
+            "UPDATE notion_sources SET selected=0 WHERE resource_id=?1",
+            [id],
+        )?;
         Ok(())
     }
 
     /// Updates the remembered name and verification time when a selected source was just read successfully.
-    pub fn refresh_source(conn: &Connection, id: &str, name: &str, database_id: Option<&str>, now: i64) -> rusqlite::Result<()> {
+    pub fn refresh_source(
+        conn: &Connection,
+        id: &str,
+        name: &str,
+        database_id: Option<&str>,
+        now: i64,
+    ) -> rusqlite::Result<()> {
         conn.execute("UPDATE notion_sources SET display_name=?2, database_id=COALESCE(?3, database_id), last_verified_at_ms=?4 WHERE resource_id=?1 AND selected=1", params![id, name, database_id, now])?;
         Ok(())
     }
 
     pub fn selected(conn: &Connection) -> rusqlite::Result<Vec<SelectedSource>> {
         let mut stmt = conn.prepare("SELECT resource_id, resource_type, display_name, database_id, selected_at_ms, last_verified_at_ms FROM notion_sources WHERE selected=1 ORDER BY display_name COLLATE NOCASE, resource_id")?;
-        let rows = stmt.query_map([], |r| Ok(SelectedSource { resource_id: r.get(0)?, resource_type: r.get(1)?, display_name: r.get(2)?, database_id: r.get(3)?, selected_at_ms: r.get(4)?, last_verified_at_ms: r.get(5)? }))?;
+        let rows = stmt.query_map([], |r| {
+            Ok(SelectedSource {
+                resource_id: r.get(0)?,
+                resource_type: r.get(1)?,
+                display_name: r.get(2)?,
+                database_id: r.get(3)?,
+                selected_at_ms: r.get(4)?,
+                last_verified_at_ms: r.get(5)?,
+            })
+        })?;
         rows.collect()
     }
 }
@@ -372,7 +520,9 @@ mod tests {
     const PG: &str = "cccccccc-cccc-cccc-cccc-cccccccccccc";
 
     fn me(workspace: &str, name: &str) -> client::tests::Scripted {
-        ok(json!({"object":"user","id":WS_A,"type":"bot","name":"CivilDesk Dev","bot":{"owner":{"type":"workspace","workspace":true},"workspace_id":workspace,"workspace_name":name}}))
+        ok(
+            json!({"object":"user","id":WS_A,"type":"bot","name":"CivilDesk Dev","bot":{"owner":{"type":"workspace","workspace":true},"workspace_id":workspace,"workspace_name":name}}),
+        )
     }
     fn memory_db() -> Database {
         let conn = Connection::open_in_memory().unwrap();
@@ -380,12 +530,25 @@ mod tests {
         crate::persistence::migrate(&conn).unwrap();
         Database(Mutex::new(conn))
     }
-    fn service(vault: &MemoryVault, ident: &str, script: Vec<client::tests::Scripted>) -> (NotionService, Arc<MockTransport>) {
+    fn service(
+        vault: &MemoryVault,
+        ident: &str,
+        script: Vec<client::tests::Scripted>,
+    ) -> (NotionService, Arc<MockTransport>) {
         let t = MockTransport::scripted(script);
         let (c, _) = test_client(t.clone());
-        (NotionService::new(ident, Box::new(MemorySecretStore::new(vault, ident)), Ok(Arc::new(c))), t)
+        (
+            NotionService::new(
+                ident,
+                Box::new(MemorySecretStore::new(vault, ident)),
+                Ok(Arc::new(c)),
+            ),
+            t,
+        )
     }
-    fn connected(script_after: Vec<client::tests::Scripted>) -> (NotionService, Database, Arc<MockTransport>, MemoryVault) {
+    fn connected(
+        script_after: Vec<client::tests::Scripted>,
+    ) -> (NotionService, Database, Arc<MockTransport>, MemoryVault) {
         let vault = MemoryVault::default();
         let mut script = vec![me("ws-1", "Lab")];
         script.extend(script_after);
@@ -396,12 +559,25 @@ mod tests {
     }
     fn all_text(db: &Database) -> String {
         let conn = db.0.lock().unwrap();
-        let tables: Vec<String> = conn.prepare("SELECT name FROM sqlite_master WHERE type='table'").unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+        let tables: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='table'")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
         let mut out = String::new();
         for t in tables {
             let mut stmt = conn.prepare(&format!("SELECT * FROM \"{t}\"")).unwrap();
             let n = stmt.column_count();
-            let rows = stmt.query_map([], |r| Ok((0..n).map(|i| format!("{:?}", r.get_ref(i).unwrap())).collect::<Vec<_>>().join("|"))).unwrap();
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok((0..n)
+                        .map(|i| format!("{:?}", r.get_ref(i).unwrap()))
+                        .collect::<Vec<_>>()
+                        .join("|"))
+                })
+                .unwrap();
             for r in rows {
                 out.push_str(&r.unwrap());
                 out.push('\n');
@@ -415,11 +591,17 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         crate::persistence::migrate(&conn).unwrap();
-        let v: u32 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
+        let v: u32 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
         assert_eq!(v, 10);
         let tables: i64 = conn.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'", [], |r| r.get(0)).unwrap();
         assert_eq!(tables, 53);
-        let fk: i64 = conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0)).unwrap();
+        let fk: i64 = conn
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(fk, 0);
     }
 
@@ -433,7 +615,10 @@ mod tests {
         assert!(s.read_only);
         assert_eq!(s.api_version, "2026-03-11");
         assert!(t.paths().is_empty());
-        assert_eq!(svc.search(&db, None, None, None).unwrap_err().kind, ErrorKind::NotConnected);
+        assert_eq!(
+            svc.search(&db, None, None, None).unwrap_err().kind,
+            ErrorKind::NotConnected
+        );
         assert!(t.paths().is_empty());
     }
 
@@ -445,7 +630,13 @@ mod tests {
         assert_eq!(s.state, "connected");
         assert_eq!(s.workspace_name.as_deref(), Some("Lab"));
         assert!(s.last_verified_at_ms.is_some());
-        assert_eq!(vault.entries(), vec![("com.webswe.civildesk.dev.notion".to_string(), "notion-connection".to_string())]);
+        assert_eq!(
+            vault.entries(),
+            vec![(
+                "com.webswe.civildesk.dev.notion".to_string(),
+                "notion-connection".to_string()
+            )]
+        );
     }
 
     #[test]
@@ -474,8 +665,17 @@ mod tests {
         let vault = MemoryVault::default();
         let (svc, t) = service(&vault, "com.webswe.civildesk.dev", vec![me("w", "x")]);
         let db = memory_db();
-        for bad in ["", "short", "has space inside the token 1234", "line\nbreak0123456789"] {
-            assert_eq!(svc.connect(&db, bad.into()).unwrap_err().kind, ErrorKind::InvalidRequest, "{bad}");
+        for bad in [
+            "",
+            "short",
+            "has space inside the token 1234",
+            "line\nbreak0123456789",
+        ] {
+            assert_eq!(
+                svc.connect(&db, bad.into()).unwrap_err().kind,
+                ErrorKind::InvalidRequest,
+                "{bad}"
+            );
         }
         assert!(t.paths().is_empty() && vault.entries().is_empty());
     }
@@ -483,7 +683,11 @@ mod tests {
     #[test]
     fn connecting_while_offline_stores_nothing() {
         let vault = MemoryVault::default();
-        let (svc, _) = service(&vault, "com.webswe.civildesk.dev", vec![Err(NetError::Offline)]);
+        let (svc, _) = service(
+            &vault,
+            "com.webswe.civildesk.dev",
+            vec![Err(NetError::Offline)],
+        );
         let db = memory_db();
         let e = svc.connect(&db, TOKEN.into()).unwrap_err();
         assert_eq!(e.kind, ErrorKind::Offline);
@@ -498,12 +702,25 @@ mod tests {
         assert_eq!(s.workspace_name.as_deref(), Some("Lab Renamed"));
         let e = svc.check(&db).unwrap_err();
         assert_eq!(e.kind, ErrorKind::AuthFailed);
-        assert_eq!(svc.status(&db).unwrap().state, "auth_failed", "revoked credentials are not shown as connected");
+        assert_eq!(
+            svc.status(&db).unwrap().state,
+            "auth_failed",
+            "revoked credentials are not shown as connected"
+        );
     }
 
     #[test]
     fn transient_failures_do_not_change_the_recorded_state() {
-        let (svc, db, _, _) = connected(vec![Err(NetError::Offline), Err(NetError::Timeout), Err(NetError::Timeout), Ok(HttpResponse { status: 429, retry_after: Some(60), body: "{}".into() })]);
+        let (svc, db, _, _) = connected(vec![
+            Err(NetError::Offline),
+            Err(NetError::Timeout),
+            Err(NetError::Timeout),
+            Ok(HttpResponse {
+                status: 429,
+                retry_after: Some(60),
+                body: "{}".into(),
+            }),
+        ]);
         assert_eq!(svc.check(&db).unwrap_err().kind, ErrorKind::Offline);
         assert_eq!(svc.status(&db).unwrap().state, "connected");
         assert_eq!(svc.check(&db).unwrap_err().kind, ErrorKind::Timeout);
@@ -521,11 +738,15 @@ mod tests {
     #[test]
     fn replacing_the_credential_overwrites_it_and_keeps_selections_in_the_same_workspace() {
         let (svc, db, _, vault) = connected(vec![
-            ok(json!({"object":"data_source","id":DS,"title":[{"plain_text":"Tasks"}],"properties":{}})),
+            ok(
+                json!({"object":"data_source","id":DS,"title":[{"plain_text":"Tasks"}],"properties":{}}),
+            ),
             me("ws-1", "Lab"),
         ]);
-        svc.set_source_selected(&db, DS.into(), "data_source".into(), true).unwrap();
-        svc.connect(&db, "ntn_second_replacement_token_99999".into()).unwrap();
+        svc.set_source_selected(&db, DS.into(), "data_source".into(), true)
+            .unwrap();
+        svc.connect(&db, "ntn_second_replacement_token_99999".into())
+            .unwrap();
         assert_eq!(vault.entries().len(), 1);
         assert_eq!(svc.selected_sources(&db).unwrap().len(), 1);
         assert!(!all_text(&db).contains("replacement_token"));
@@ -533,26 +754,57 @@ mod tests {
 
     #[test]
     fn switching_to_a_different_workspace_drops_old_selections() {
-        let (svc, db, _, _) = connected(vec![ok(json!({"object":"data_source","id":DS,"title":[{"plain_text":"Tasks"}],"properties":{}})), me("ws-OTHER", "Other")]);
-        svc.set_source_selected(&db, DS.into(), "data_source".into(), true).unwrap();
-        svc.connect(&db, "ntn_other_workspace_token_12345".into()).unwrap();
+        let (svc, db, _, _) = connected(vec![
+            ok(
+                json!({"object":"data_source","id":DS,"title":[{"plain_text":"Tasks"}],"properties":{}}),
+            ),
+            me("ws-OTHER", "Other"),
+        ]);
+        svc.set_source_selected(&db, DS.into(), "data_source".into(), true)
+            .unwrap();
+        svc.connect(&db, "ntn_other_workspace_token_12345".into())
+            .unwrap();
         assert!(svc.selected_sources(&db).unwrap().is_empty());
     }
 
     #[test]
     fn disconnect_removes_the_credential_metadata_and_blocks_future_requests() {
-        let (svc, db, t, vault) = connected(vec![ok(json!({"object":"data_source","id":DS,"title":[{"plain_text":"Tasks"}],"properties":{}}))]);
-        svc.set_source_selected(&db, DS.into(), "data_source".into(), true).unwrap();
-        db.0.lock().unwrap().execute("INSERT INTO app_state(key,value) VALUES ('unrelated','keep')", []).unwrap();
+        let (svc, db, t, vault) = connected(vec![ok(
+            json!({"object":"data_source","id":DS,"title":[{"plain_text":"Tasks"}],"properties":{}}),
+        )]);
+        svc.set_source_selected(&db, DS.into(), "data_source".into(), true)
+            .unwrap();
+        db.0.lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO app_state(key,value) VALUES ('unrelated','keep')",
+                [],
+            )
+            .unwrap();
         let s = svc.disconnect(&db).unwrap();
         assert_eq!(s.state, "not_connected");
         assert_eq!(s.selected_count, 0);
         assert!(vault.entries().is_empty());
         assert!(svc.selected_sources(&db).unwrap().is_empty());
         let before = t.paths().len();
-        assert_eq!(svc.search(&db, None, None, None).unwrap_err().kind, ErrorKind::NotConnected);
-        assert_eq!(t.paths().len(), before, "no Notion request after disconnect");
-        let kept: String = db.0.lock().unwrap().query_row("SELECT value FROM app_state WHERE key='unrelated'", [], |r| r.get(0)).unwrap();
+        assert_eq!(
+            svc.search(&db, None, None, None).unwrap_err().kind,
+            ErrorKind::NotConnected
+        );
+        assert_eq!(
+            t.paths().len(),
+            before,
+            "no Notion request after disconnect"
+        );
+        let kept: String =
+            db.0.lock()
+                .unwrap()
+                .query_row(
+                    "SELECT value FROM app_state WHERE key='unrelated'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
         assert_eq!(kept, "keep");
         assert!(svc.disconnect(&db).is_ok(), "disconnect is idempotent");
     }
@@ -566,95 +818,168 @@ mod tests {
         let db_prod = memory_db();
         dev.connect(&db_dev, TOKEN.into()).unwrap();
         assert_eq!(prod.status(&db_prod).unwrap().state, "not_connected");
-        assert_eq!(prod.search(&db_prod, None, None, None).unwrap_err().kind, ErrorKind::NotConnected);
+        assert_eq!(
+            prod.search(&db_prod, None, None, None).unwrap_err().kind,
+            ErrorKind::NotConnected
+        );
         assert!(tp.paths().is_empty());
         assert_eq!(dev.status(&db_dev).unwrap().state, "connected");
     }
 
     #[test]
     fn discovery_search_and_pagination() {
-        let page1 = ok(json!({"object":"list","has_more":true,"next_cursor":"cursor-2","results":[
-            {"object":"data_source","id":DS,"title":[{"plain_text":"Assignments"}],"parent":{"type":"database_id","database_id":PG},"properties":{}}]}));
-        let page2 = ok(json!({"object":"list","has_more":false,"next_cursor":null,"results":[
-            {"object":"page","id":PG,"properties":{"Name":{"type":"title","title":[{"plain_text":"Notes"}]}}}]}));
+        let page1 = ok(
+            json!({"object":"list","has_more":true,"next_cursor":"cursor-2","results":[
+            {"object":"data_source","id":DS,"title":[{"plain_text":"Assignments"}],"parent":{"type":"database_id","database_id":PG},"properties":{}}]}),
+        );
+        let page2 = ok(
+            json!({"object":"list","has_more":false,"next_cursor":null,"results":[
+            {"object":"page","id":PG,"properties":{"Name":{"type":"title","title":[{"plain_text":"Notes"}]}}}]}),
+        );
         let (svc, db, t, _) = connected(vec![page1, page2]);
         let a = svc.search(&db, Some("a".into()), None, None).unwrap();
         assert!(a.has_more);
-        let b = svc.search(&db, Some("a".into()), None, a.next_cursor.clone()).unwrap();
+        let b = svc
+            .search(&db, Some("a".into()), None, a.next_cursor.clone())
+            .unwrap();
         assert!(!b.has_more && b.next_cursor.is_none());
         assert_eq!(a.items[0].resource_type, "data_source");
         assert_eq!(b.items[0].name, "Notes");
-        let bodies: Vec<String> = t.seen.lock().unwrap().iter().filter_map(|(_, _, b)| b.clone()).collect();
+        let bodies: Vec<String> = t
+            .seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(_, _, b)| b.clone())
+            .collect();
         assert!(bodies[1].contains("cursor-2"));
     }
 
     #[test]
     fn database_then_data_source_then_entries_use_the_right_endpoints() {
         let (svc, db, t, _) = connected(vec![
-            ok(json!({"object":"database","id":PG,"title":[{"plain_text":"Coursework"}],"data_sources":[{"id":DS,"name":"Main"}]})),
-            ok(json!({"object":"data_source","id":DS,"title":[{"plain_text":"Main"}],"parent":{"type":"database_id","database_id":PG},"properties":{"Name":{"type":"title","title":{}}}})),
-            ok(json!({"object":"list","has_more":false,"next_cursor":null,"results":[{"object":"page","id":WS_A,"properties":{"Name":{"type":"title","title":[{"plain_text":"Row"}]}}}]})),
+            ok(
+                json!({"object":"database","id":PG,"title":[{"plain_text":"Coursework"}],"data_sources":[{"id":DS,"name":"Main"}]}),
+            ),
+            ok(
+                json!({"object":"data_source","id":DS,"title":[{"plain_text":"Main"}],"parent":{"type":"database_id","database_id":PG},"properties":{"Name":{"type":"title","title":{}}}}),
+            ),
+            ok(
+                json!({"object":"list","has_more":false,"next_cursor":null,"results":[{"object":"page","id":WS_A,"properties":{"Name":{"type":"title","title":[{"plain_text":"Row"}]}}}]}),
+            ),
         ]);
         let d = svc.open_database(&db, PG.into()).unwrap();
         assert_eq!(d.data_sources[0].id, DS);
-        let ds = svc.open_data_source(&db, d.data_sources[0].id.clone()).unwrap();
+        let ds = svc
+            .open_data_source(&db, d.data_sources[0].id.clone())
+            .unwrap();
         assert_eq!(ds.properties.len(), 1);
         let rows = svc.preview_entries(&db, ds.id.clone(), None).unwrap();
         assert_eq!(rows.rows[0].title, "Row");
         let paths = t.paths();
         assert!(paths[1].starts_with(&format!("/v1/databases/{PG}")));
-        assert!(paths[2].starts_with(&format!("/v1/data_sources/{DS}")) && !paths[2].contains("/query"));
+        assert!(
+            paths[2].starts_with(&format!("/v1/data_sources/{DS}")) && !paths[2].contains("/query")
+        );
         assert!(paths[3].ends_with("/query"));
         // database ids and data source ids are not interchangeable: a database id is never sent to a data source endpoint
-        assert!(!paths.iter().any(|p| p.contains(&format!("data_sources/{PG}"))));
+        assert!(!paths
+            .iter()
+            .any(|p| p.contains(&format!("data_sources/{PG}"))));
     }
 
     #[test]
     fn unauthorized_resource_is_a_clear_restricted_or_not_found_error() {
         let (svc, db, _, _) = connected(vec![status(404), status(403)]);
-        assert_eq!(svc.open_page(&db, PG.into()).unwrap_err().kind, ErrorKind::NotFound);
-        assert_eq!(svc.open_data_source(&db, DS.into()).unwrap_err().kind, ErrorKind::Restricted);
-        assert_eq!(svc.status(&db).unwrap().state, "connected", "a single inaccessible item does not disconnect");
+        assert_eq!(
+            svc.open_page(&db, PG.into()).unwrap_err().kind,
+            ErrorKind::NotFound
+        );
+        assert_eq!(
+            svc.open_data_source(&db, DS.into()).unwrap_err().kind,
+            ErrorKind::Restricted
+        );
+        assert_eq!(
+            svc.status(&db).unwrap().state,
+            "connected",
+            "a single inaccessible item does not disconnect"
+        );
     }
 
     #[test]
     fn a_401_while_browsing_marks_the_connection_as_failed() {
         let (svc, db, _, _) = connected(vec![status(401)]);
-        assert_eq!(svc.search(&db, None, None, None).unwrap_err().kind, ErrorKind::AuthFailed);
+        assert_eq!(
+            svc.search(&db, None, None, None).unwrap_err().kind,
+            ErrorKind::AuthFailed
+        );
         assert_eq!(svc.status(&db).unwrap().state, "auth_failed");
     }
 
     #[test]
     fn selecting_a_source_persists_metadata_and_survives_a_new_service() {
-        let (svc, db, _, vault) = connected(vec![ok(json!({"object":"data_source","id":DS,"title":[{"plain_text":"Assignments"}],"parent":{"type":"database_id","database_id":PG},"properties":{}}))]);
-        let list = svc.set_source_selected(&db, DS.to_uppercase(), "data_source".into(), true).unwrap();
+        let (svc, db, _, vault) = connected(vec![ok(
+            json!({"object":"data_source","id":DS,"title":[{"plain_text":"Assignments"}],"parent":{"type":"database_id","database_id":PG},"properties":{}}),
+        )]);
+        let list = svc
+            .set_source_selected(&db, DS.to_uppercase(), "data_source".into(), true)
+            .unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].display_name, "Assignments");
         assert_eq!(list[0].database_id.as_deref(), Some(PG));
         assert!(list[0].last_verified_at_ms.is_some());
         let (restarted, t2) = service(&vault, "com.webswe.civildesk.dev", vec![]);
-        assert_eq!(restarted.selected_sources(&db).unwrap(), list, "selection is local and needs no network");
+        assert_eq!(
+            restarted.selected_sources(&db).unwrap(),
+            list,
+            "selection is local and needs no network"
+        );
         assert_eq!(restarted.status(&db).unwrap().selected_count, 1);
         assert!(t2.paths().is_empty());
-        let after = restarted.set_source_selected(&db, DS.into(), "data_source".into(), false).unwrap();
+        let after = restarted
+            .set_source_selected(&db, DS.into(), "data_source".into(), false)
+            .unwrap();
         assert!(after.is_empty());
     }
 
     #[test]
     fn selection_uses_notion_metadata_not_caller_supplied_names_and_rejects_bad_types() {
         let (svc, db, _, _) = connected(vec![status(404)]);
-        assert_eq!(svc.set_source_selected(&db, PG.into(), "page".into(), true).unwrap_err().kind, ErrorKind::NotFound);
+        assert_eq!(
+            svc.set_source_selected(&db, PG.into(), "page".into(), true)
+                .unwrap_err()
+                .kind,
+            ErrorKind::NotFound
+        );
         assert!(svc.selected_sources(&db).unwrap().is_empty());
-        assert_eq!(svc.set_source_selected(&db, PG.into(), "database".into(), true).unwrap_err().kind, ErrorKind::InvalidRequest);
-        assert_eq!(svc.set_source_selected(&db, "../x".into(), "page".into(), true).unwrap_err().kind, ErrorKind::InvalidRequest);
+        assert_eq!(
+            svc.set_source_selected(&db, PG.into(), "database".into(), true)
+                .unwrap_err()
+                .kind,
+            ErrorKind::InvalidRequest
+        );
+        assert_eq!(
+            svc.set_source_selected(&db, "../x".into(), "page".into(), true)
+                .unwrap_err()
+                .kind,
+            ErrorKind::InvalidRequest
+        );
     }
 
     #[test]
     fn selecting_never_creates_tasks_or_projects() {
-        let (svc, db, _, _) = connected(vec![ok(json!({"object":"data_source","id":DS,"title":[{"plain_text":"Tasks"}],"properties":{}}))]);
-        let count = |table: &str| -> i64 { db.0.lock().unwrap().query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0)).unwrap() };
+        let (svc, db, _, _) = connected(vec![ok(
+            json!({"object":"data_source","id":DS,"title":[{"plain_text":"Tasks"}],"properties":{}}),
+        )]);
+        let count = |table: &str| -> i64 {
+            db.0.lock()
+                .unwrap()
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap()
+        };
         let before = (count("tasks"), count("engineering_projects"));
-        svc.set_source_selected(&db, DS.into(), "data_source".into(), true).unwrap();
+        svc.set_source_selected(&db, DS.into(), "data_source".into(), true)
+            .unwrap();
         assert_eq!((count("tasks"), count("engineering_projects")), before);
     }
 
@@ -669,7 +994,14 @@ mod tests {
         svc.open_page(&db, PG.into()).unwrap();
         svc.page_blocks(&db, PG.into(), None).unwrap();
         for (m, p, _) in t.seen.lock().unwrap().iter() {
-            assert!(client::is_allowed(&client::HttpRequest { method: *m, path: p.clone(), body: None }), "{p}");
+            assert!(
+                client::is_allowed(&client::HttpRequest {
+                    method: *m,
+                    path: p.clone(),
+                    body: None
+                }),
+                "{p}"
+            );
         }
         assert!(t.tokens.lock().unwrap().iter().all(|x| x == TOKEN));
     }
