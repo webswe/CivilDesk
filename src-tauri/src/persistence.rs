@@ -155,9 +155,9 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), String> {
     let version: u32 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|e| format!("Could not read database schema version: {e}"))?;
-    if version > 9 {
+    if version > 10 {
         return Err(format!(
-            "Database schema version {version} is newer than supported version 9"
+            "Database schema version {version} is newer than supported version 10"
         ));
     }
     if version == 0 {
@@ -466,6 +466,28 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), String> {
             PRAGMA user_version = 9; COMMIT;")
             .map_err(|e| e.to_string())?;
     }
+    if version < 10 {
+        // Phase 5A: nonsecret Notion connection metadata and the user's remembered sources. Credentials are never stored here.
+        conn.execute_batch("BEGIN IMMEDIATE;
+            CREATE TABLE notion_connection (
+                id TEXT PRIMARY KEY NOT NULL CHECK(id = 'default'),
+                identifier TEXT NOT NULL,
+                bot_name TEXT, workspace_id TEXT, workspace_name TEXT,
+                status TEXT NOT NULL CHECK(status IN ('connected','auth_failed','restricted')),
+                connected_at_ms INTEGER NOT NULL, last_verified_at_ms INTEGER
+            );
+            CREATE TABLE notion_sources (
+                connection_id TEXT NOT NULL REFERENCES notion_connection(id) ON DELETE CASCADE,
+                resource_id TEXT NOT NULL,
+                resource_type TEXT NOT NULL CHECK(resource_type IN ('page','data_source')),
+                display_name TEXT NOT NULL, database_id TEXT,
+                selected INTEGER NOT NULL DEFAULT 1 CHECK(selected IN (0,1)),
+                selected_at_ms INTEGER NOT NULL, last_verified_at_ms INTEGER,
+                PRIMARY KEY(connection_id, resource_id)
+            );
+            PRAGMA user_version = 10; COMMIT;")
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -528,7 +550,7 @@ mod tests {
                     .unwrap()
                     .pragma_query_value(None, "user_version", |row| row.get(0))
                     .unwrap();
-            assert_eq!(version, 9);
+            assert_eq!(version, 10);
         }
         std::fs::remove_file(path).unwrap();
     }
@@ -548,7 +570,7 @@ mod tests {
         let path = unique_test_path();
         {
             let connection = Connection::open(&path).unwrap();
-            connection.execute_batch("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO app_state VALUES ('marker', 'keep'); PRAGMA user_version = 10;").unwrap();
+            connection.execute_batch("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO app_state VALUES ('marker', 'keep'); PRAGMA user_version = 11;").unwrap();
         }
         assert!(Database::open(&path).is_err());
         let connection = Connection::open(&path).unwrap();
@@ -584,7 +606,7 @@ mod tests {
                 .unwrap()
                 .pragma_query_value(None, "user_version", |r| r.get(0))
                 .unwrap();
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
         drop(db);
         std::fs::remove_file(path).unwrap();
     }
@@ -613,7 +635,7 @@ mod tests {
         let version: i64 = c
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
         drop(c);
         drop(db);
         std::fs::remove_file(path).unwrap();

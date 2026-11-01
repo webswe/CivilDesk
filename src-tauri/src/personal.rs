@@ -1957,7 +1957,7 @@ mod tests {
             // Make this a genuine v7 file: remove everything v8 added and rewind the version.
             let c = d.0.lock().unwrap();
             c.execute_batch(
-                "DROP TABLE portfolio_milestones; DROP TABLE portfolio_gallery; DROP TABLE portfolio_tools; DROP TABLE portfolio_case_studies; DROP TABLE daily_priorities; DROP TABLE recurrence_occurrences; DROP TABLE recurrence_rules;
+                "DROP TABLE notion_sources; DROP TABLE notion_connection; DROP TABLE portfolio_milestones; DROP TABLE portfolio_gallery; DROP TABLE portfolio_tools; DROP TABLE portfolio_case_studies; DROP TABLE daily_priorities; DROP TABLE recurrence_occurrences; DROP TABLE recurrence_rules;
                  DROP TABLE routine_execution_steps; DROP TABLE routine_executions; DROP TABLE routine_steps; DROP TABLE routines;
                  DROP TABLE habit_checkins; DROP TABLE habit_schedules; DROP TABLE habits;
                  DROP TABLE goal_entries; DROP TABLE goal_targets; DROP TABLE goals; PRAGMA user_version = 7;",
@@ -1974,7 +1974,7 @@ mod tests {
         let version: i64 = c
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 9);
+        assert_eq!(version, 10);
         let violations = c
             .prepare("PRAGMA foreign_key_check")
             .unwrap()

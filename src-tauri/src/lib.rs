@@ -2,6 +2,7 @@ mod academic;
 mod calendar;
 mod challenges;
 mod dates;
+mod notion;
 mod persistence;
 mod personal;
 mod portfolio;
@@ -604,7 +605,79 @@ fn export_case_study(
         .database()?
         .export_case_study(&project_id, &destination, overwrite)
 }
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
+
+// ---- Phase 5A: read-only Notion integration. Every command is a read or a local-state change; none can write to Notion.
+struct NotionState(notion::NotionService);
+
+async fn notion_run<T: Send + 'static>(
+    app: tauri::AppHandle,
+    work: impl FnOnce(&Database, &notion::NotionService) -> Result<T, notion::client::NotionError> + Send + 'static,
+) -> Result<T, notion::client::NotionError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let runtime = app.state::<RuntimeState>();
+        let service = app.state::<NotionState>();
+        let database = runtime
+            .database()
+            .map_err(notion::client::NotionError::storage)?;
+        work(database, &service.0)
+    })
+    .await
+    .map_err(|_| notion::client::NotionError::storage("The Notion task could not complete."))?
+}
+
+#[tauri::command]
+async fn notion_status(app: tauri::AppHandle) -> Result<notion::ConnectionStatus, notion::client::NotionError> {
+    notion_run(app, |db, n| n.status(db)).await
+}
+/// The token is moved into the backend, verified, stored in Windows Credential Manager, and never returned.
+#[tauri::command]
+async fn notion_connect(app: tauri::AppHandle, token: String) -> Result<notion::ConnectionStatus, notion::client::NotionError> {
+    notion_run(app, move |db, n| n.connect(db, token)).await
+}
+#[tauri::command]
+async fn notion_check(app: tauri::AppHandle) -> Result<notion::ConnectionStatus, notion::client::NotionError> {
+    notion_run(app, |db, n| n.check(db)).await
+}
+#[tauri::command]
+async fn notion_disconnect(app: tauri::AppHandle) -> Result<notion::ConnectionStatus, notion::client::NotionError> {
+    notion_run(app, |db, n| n.disconnect(db)).await
+}
+#[tauri::command]
+fn notion_cancel(state: tauri::State<'_, NotionState>) {
+    state.0.cancel_all();
+}
+#[tauri::command]
+async fn notion_search(app: tauri::AppHandle, query: Option<String>, kind: Option<String>, cursor: Option<String>) -> Result<notion::parse::DiscoveryPage, notion::client::NotionError> {
+    notion_run(app, move |db, n| n.search(db, query, kind, cursor)).await
+}
+#[tauri::command]
+async fn notion_open_database(app: tauri::AppHandle, id: String) -> Result<notion::parse::DatabaseView, notion::client::NotionError> {
+    notion_run(app, move |db, n| n.open_database(db, id)).await
+}
+#[tauri::command]
+async fn notion_open_data_source(app: tauri::AppHandle, id: String) -> Result<notion::parse::DataSourceView, notion::client::NotionError> {
+    notion_run(app, move |db, n| n.open_data_source(db, id)).await
+}
+#[tauri::command]
+async fn notion_preview_entries(app: tauri::AppHandle, id: String, cursor: Option<String>) -> Result<notion::parse::EntriesPage, notion::client::NotionError> {
+    notion_run(app, move |db, n| n.preview_entries(db, id, cursor)).await
+}
+#[tauri::command]
+async fn notion_open_page(app: tauri::AppHandle, id: String) -> Result<notion::parse::PageView, notion::client::NotionError> {
+    notion_run(app, move |db, n| n.open_page(db, id)).await
+}
+#[tauri::command]
+async fn notion_page_blocks(app: tauri::AppHandle, id: String, cursor: Option<String>) -> Result<notion::parse::BlocksPage, notion::client::NotionError> {
+    notion_run(app, move |db, n| n.page_blocks(db, id, cursor)).await
+}
+#[tauri::command]
+async fn notion_set_source_selected(app: tauri::AppHandle, resource_id: String, resource_type: String, selected: bool) -> Result<Vec<notion::SelectedSource>, notion::client::NotionError> {
+    notion_run(app, move |db, n| n.set_source_selected(db, resource_id, resource_type, selected)).await
+}
+#[tauri::command]
+async fn notion_selected_sources(app: tauri::AppHandle) -> Result<Vec<notion::SelectedSource>, notion::client::NotionError> {
+    notion_run(app, |db, n| n.selected_sources(db)).await
+}#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -631,6 +704,9 @@ pub fn run() {
                 },
             };
             app.manage(state);
+            app.manage(NotionState(notion::NotionService::production(
+                &app.config().identifier,
+            )));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -705,7 +781,20 @@ pub fn run() {
             skip_occurrence,
             restore_occurrence,
             generate_recurring,
-            set_daily_priorities
+            set_daily_priorities,
+            notion_status,
+            notion_connect,
+            notion_check,
+            notion_disconnect,
+            notion_cancel,
+            notion_search,
+            notion_open_database,
+            notion_open_data_source,
+            notion_preview_entries,
+            notion_open_page,
+            notion_page_blocks,
+            notion_set_source_selected,
+            notion_selected_sources
         ])
         .run(tauri::generate_context!())
         .expect("CivilDesk could not start");

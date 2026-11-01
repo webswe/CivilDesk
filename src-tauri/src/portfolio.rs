@@ -1747,7 +1747,7 @@ Survey points were provided by the instructor."
             c.pragma_update(None, "foreign_keys", "ON").unwrap();
             // Build a v8-shaped database: the application's own migrations, with the v9 additions taken away again.
             crate::persistence::migrate(&c).unwrap();
-            c.execute_batch("DROP INDEX portfolio_gallery_order; DROP TABLE portfolio_milestones; DROP TABLE portfolio_gallery; DROP TABLE portfolio_tools; DROP TABLE portfolio_case_studies; PRAGMA user_version = 8;").unwrap();
+            c.execute_batch("DROP TABLE notion_sources; DROP TABLE notion_connection; DROP INDEX portfolio_gallery_order; DROP TABLE portfolio_milestones; DROP TABLE portfolio_gallery; DROP TABLE portfolio_tools; DROP TABLE portfolio_case_studies; PRAGMA user_version = 8;").unwrap();
             c.execute("INSERT INTO engineering_projects(id,title,description,discipline,category,project_type,status,created_at_ms,updated_at_ms) VALUES ('old','Old project','kept','Land Development','','Academic exercise','Planning',1,1)", []).unwrap();
             let v: u32 = c
                 .pragma_query_value(None, "user_version", |r| r.get(0))
@@ -1759,7 +1759,7 @@ Survey points were provided by the instructor."
         let v: u32 = c
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(v, 9);
+        assert_eq!(v, 10);
         let title: String = c
             .query_row(
                 "SELECT title FROM engineering_projects WHERE id='old'",

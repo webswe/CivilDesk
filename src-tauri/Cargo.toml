@@ -18,3 +18,9 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.41", features = ["bundled"] }
+keyring = { version = "3", default-features = false, features = ["windows-native"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "native-tls"] }
+
+[features]
+# Routes the Notion client to a loopback mock. Compiled ONLY into the E2E binary; never enabled by default or in release builds.
+notion-mock = []
