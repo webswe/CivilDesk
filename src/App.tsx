@@ -22,8 +22,13 @@ import { loadStudy, saveStudyBlock, saveStudyGoal, setStudyBlockCancelled, type 
 import { type FocusContext } from './services/workspace';
 import { contextLabel, courseworkItems, itemFor } from './domain/academic';
 import { loadAcademic, saveCourse, saveCoursework, saveSemester, setActiveSemester, setCourseArchived, setSemesterArchived, type AcademicData } from './services/academic';
+import { PersonalPage } from './PersonalPage';
+import { addGoalEntry, completeRoutine, generateRecurring, loadPersonal, restoreOccurrence, saveGoal, saveHabit, saveRecurrence, saveRoutine, setDailyPriorities, setGoalStatus, setHabitCheckin, setHabitStatus, setRecurrenceStatus, setRoutineStatus, setRoutineStep, skipOccurrence, startRoutine, voidGoalEntry, type PersonalData } from './services/personal';
+import type { PersonalOps, PersonalTab } from './personal/shared';
+import { localDate } from './domain/scheduling';
 import { associateTask, deleteProjectItem, loadProjects, openProjectFile, saveJournalEntry, saveMilestone, saveProject, saveProjectFile, setMilestoneCompleted, type ProjectsData } from './services/projects';
 
+const personalOps: PersonalOps = { saveGoal, setGoalStatus, addGoalEntry, voidGoalEntry, saveHabit, setHabitStatus, setHabitCheckin, saveRoutine, setRoutineStatus, startRoutine, setRoutineStep, completeRoutine, saveRecurrence, setRecurrenceStatus, skipOccurrence, restoreOccurrence, setDailyPriorities };
 function Onboarding({ onDone }: { onDone: (name: string, visible: boolean, engagement: Engagement) => void }) {
   const [name, setName] = useState('');
   const [visible, setVisible] = useState(true);
@@ -59,6 +64,9 @@ export default function App() {
   const [challenges, setChallenges] = useState<ChallengeData | null>(null);
   const [academic, setAcademic] = useState<AcademicData | null>(null);
   const [study, setStudy] = useState<StudyData | null>(null);
+  const [personal, setPersonal] = useState<PersonalData | null>(null);
+  const [personalTab, setPersonalTab] = useState<PersonalTab>('overview');
+  const lastDay = useRef(localDate());
   const [schoolFocus, setSchoolFocus] = useState<SchoolFocus | null>(null);
   const [focusContext, setFocusContext] = useState<FocusContext>({});
   const [page, setPage] = useState('Dashboard');
@@ -67,12 +75,26 @@ export default function App() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [narrow, setNarrow] = useState(() => window.innerWidth <= 760);
   useEffect(() => { const onResize = () => setNarrow(window.innerWidth <= 760); window.addEventListener('resize', onResize); return () => window.removeEventListener('resize', onResize); }, []);
-  const go = (next: string) => { setStartNewTask(false); setSchoolFocus(null); setFocusContext({}); setPage(next); };
+  const go = (next: string) => { setStartNewTask(false); setSchoolFocus(null); setFocusContext({}); if (next === 'Personal') setPersonalTab('overview'); setPage(next); };
+  const openPersonal = (tab: PersonalTab) => { setStartNewTask(false); setSchoolFocus(null); setFocusContext({}); setPersonalTab(tab); setPage('Personal'); };
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [reminderAlert, setReminderAlert] = useState('');
   const attemptedWeek = useRef('');
-  useEffect(() => { Promise.all([loadSnapshot(), loadWorkspace(), loadProjects(), loadChallenges(), loadAcademic(), loadStudy()]).then(([s, w, p, c, a, st]) => { setSnapshot(s); setWorkspace(w); setProjects(p); setChallenges(c); setAcademic(a); setStudy(st); }).catch(e => setError(String(e))); }, []);
+  useEffect(() => {
+    // Recurring responsibilities are created for today and the next few days before anything is shown. The call is idempotent.
+    generateRecurring(localDate()).catch(e => setError('Could not prepare recurring tasks: ' + String(e)))
+      .then(() => Promise.all([loadSnapshot(), loadWorkspace(), loadProjects(), loadChallenges(), loadAcademic(), loadStudy(), loadPersonal()]))
+      .then(([s, w, p, c, a, st, pe]) => { setSnapshot(s); setWorkspace(w); setProjects(p); setChallenges(c); setAcademic(a); setStudy(st); setPersonal(pe); }).catch(e => setError(String(e)));
+  }, []);
+  useEffect(() => {
+    // When the local date changes while the app is open, create the new day's occurrences and refresh.
+    const timer = window.setInterval(() => {
+      const day = localDate(); if (day === lastDay.current) return; lastDay.current = day;
+      void generateRecurring(day).then(() => Promise.all([loadWorkspace(), loadPersonal()])).then(([w, pe]) => { setWorkspace(w); setPersonal(pe); }).catch(e => setError(String(e)));
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   useEffect(() => { document.documentElement.classList.toggle('reduced-motion', !!snapshot?.preferences.reducedMotion); }, [snapshot?.preferences.reducedMotion]);
   useEffect(() => {
     if (!workspace || !workspace.reminderPreferences.enabled) return;
@@ -96,7 +118,7 @@ export default function App() {
   async function update(next: AppSnapshot) { setSnapshot(next); setSaving(true); try { await saveSnapshot(next); setError(''); } catch (e) { setError('Could not save your changes: ' + String(e)); } finally { setSaving(false); } }
   async function mutate(operation: () => Promise<void>): Promise<boolean> {
     setSaving(true);
-    try { await operation(); const [w,p,a,st] = await Promise.all([loadWorkspace(),loadProjects(),loadAcademic(),loadStudy()]); setWorkspace(w); setProjects(p); setAcademic(a); setStudy(st); setError(''); return true; }
+    try { await operation(); const [w,p,a,st,pe] = await Promise.all([loadWorkspace(),loadProjects(),loadAcademic(),loadStudy(),loadPersonal()]); setWorkspace(w); setProjects(p); setAcademic(a); setStudy(st); setPersonal(pe); setError(''); return true; }
     catch (e) { setError('Could not save your changes: ' + String(e)); return false; }
     finally { setSaving(false); }
   }
@@ -110,7 +132,7 @@ export default function App() {
   /** Runs an academic save and returns its error text so the open dialog can show it. */
   async function runAcademic(operation: () => Promise<void>): Promise<string | null> {
     setSaving(true);
-    try { await operation(); const [w, a, st] = await Promise.all([loadWorkspace(), loadAcademic(), loadStudy()]); setWorkspace(w); setAcademic(a); setStudy(st); setError(''); return null; }
+    try { await operation(); const [w, a, st, pe] = await Promise.all([loadWorkspace(), loadAcademic(), loadStudy(), loadPersonal()]); setWorkspace(w); setAcademic(a); setStudy(st); setPersonal(pe); setError(''); return null; }
     catch (e) { return e instanceof Error ? e.message : String(e); }
     finally { setSaving(false); }
   }
@@ -129,7 +151,7 @@ export default function App() {
     }
   }
   if (error && !snapshot) return <div className="fatal"><h1>CivilDesk could not open</h1><p>{error}</p><button onClick={() => window.location.reload()}>Try again</button></div>;
-  if (!snapshot || !workspace || !projects || !challenges || !academic || !study) return <div className="loading">Opening CivilDesk…</div>;
+  if (!snapshot || !workspace || !projects || !challenges || !academic || !study || !personal) return <div className="loading">Opening CivilDesk…</div>;
   if (!snapshot.preferences.onboardingComplete) return <>{error && <div role="alert" className="error-banner">{error}</div>}<Onboarding onDone={(name, visible, engagement) => void update({ ...snapshot, preferences: { ...snapshot.preferences, displayName: name, pipVisible: visible, engagement, onboardingComplete: true } })}/></>;
   const collapsed = snapshot.preferences.sidebarCollapsed || narrow;
   const { activeId, group: activeGroup } = locate(page);
@@ -154,10 +176,11 @@ export default function App() {
     })}</nav>
     <div className="sidebar-bottom"><PipDock snapshot={snapshot} data={workspace} collapsed={collapsed} onPip={pip} open={() => go('Pip')}/><div className="utility-nav">{utilityNav.map(item => navButton(item))}</div><div className="account"><span className="avatar">{snapshot.preferences.displayName.charAt(0).toUpperCase() || 'C'}</span><span className="account-name">{snapshot.preferences.displayName}<small>Stored on this computer</small></span></div></div></aside>
     <main className="main"><header className="topbar"><nav className="breadcrumb" aria-label="Breadcrumb">{crumbParent && (activeGroup ? <span>{crumbParent}</span> : <button className="crumb-link" onClick={() => go(activeId)}>{crumbParent}</button>)}{crumbParent && <ChevronRight size={14}/>}<strong aria-current="page">{pageLabel(page)}</strong></nav><div className="top-actions">{saving && <span className="save-status" role="status">Saving…</span>}</div></header>{error && <div role="alert" className="error-banner">{error}</div>}{reminderAlert && <div className="reminder-banner" role="status"><span>{reminderAlert}</span><button aria-label="Dismiss reminder" onClick={() => setReminderAlert('')}>Dismiss</button></div>}<div className="content">
-    {page === 'Calendar' ? <CalendarPage data={workspace} projects={projects} challenges={challenges} academic={academic} study={study} openStudyBlock={openStudyBlock} openCoursework={openCoursework} save={async event => mutate(() => saveEvent(event))} remove={async id => { await mutate(() => deleteEvent(id)); }}/>
+    {page === 'Calendar' ? <CalendarPage data={workspace} projects={projects} challenges={challenges} academic={academic} study={study} personal={personal} openPersonal={openPersonal} openStudyBlock={openStudyBlock} openCoursework={openCoursework} save={async event => mutate(() => saveEvent(event))} remove={async id => { await mutate(() => deleteEvent(id)); }}/>
       : page === 'Notifications' ? <NotificationsPage data={workspace} save={async prefs => { await mutate(() => saveReminderPreferences(prefs)); }}/>
       : page === 'Weekly Challenges' || page === 'Skills' ? <ChallengesPage key={page} initialTab={page === 'Skills' ? 'skills' : 'board'} data={challenges} projects={projects} refresh={async()=>{const [c,p]=await Promise.all([loadChallenges(),loadProjects()]);setChallenges(c);setProjects(p)}} saveSettings={saveChallengeSettings} assign={assignWeek} act={async(id,action,options)=>{await challengeAction(id,action,options);if(action==='complete'&&challenges.progress.find(p=>p.challengeId===id)?.status!=='Completed')pip('ENGINEERING_ACCOMPLISHMENT')}} evidence={addChallengeEvidence} removeEvidence={removeChallengeEvidence} link={linkChallengeProject} createProject={async id=>{const existing=challenges.projects.some(p=>p.challengeId===id&&p.createdFromChallenge);await createChallengeProject(id);if(!existing)pip('ENGINEERING_ACCOMPLISHMENT')}}/>
       : page === 'School' ? <SchoolPage key={schoolFocus ? (schoolFocus.taskId ?? schoolFocus.blockId ?? 'focus') : 'school'} data={workspace} academic={academic} study={study} focus={schoolFocus} startStudy={startStudy} startWithNew={startNewTask} onScope={scope => go(pageForScope(scope))} run={runAcademic} ops={{ saveSemester, setActive: setActiveSemester, archiveSemester: setSemesterArchived, saveCourse, archiveCourse: setCourseArchived, saveCoursework, saveBlock: saveStudyBlock, cancelBlock: setStudyBlockCancelled, saveGoal: saveStudyGoal }} save={async (task: TaskInput) => mutate(() => saveTask(task))} remove={async id => { await mutate(() => deleteTask(id)); }} complete={completeTask} startFocus={id => { setFocusTask(id); go('Focus Sessions'); }}/>
+      : page === 'Personal' ? <PersonalPage data={workspace} personal={personal} today={localDate()} tab={personalTab} onTab={setPersonalTab} ops={personalOps} run={runAcademic} startWithNew={startNewTask} onScope={scope => go(pageForScope(scope))} save={async (task: TaskInput) => mutate(() => saveTask(task))} remove={async id => { await mutate(() => deleteTask(id)); }} complete={completeTask} startFocus={id => { setFocusTask(id); go('Focus Sessions'); }} onProgress={() => pip('TASK_COMPLETED')}/>
       : page in scopeOf ? <TasksPage data={workspace} scope={scopeOf[page]!} startWithNew={startNewTask} onScope={scope => go(pageForScope(scope))} save={async (task: TaskInput) => mutate(() => saveTask(task))} remove={async id => { await mutate(() => deleteTask(id)); }} complete={completeTask}/>
       : page === 'Projects' || page === 'Engineering Journal' ? <ProjectsPage data={projects} workspace={workspace} saveProject={p=>mutate(()=>saveProject(p))} saveMilestone={m=>mutate(()=>saveMilestone(m))} completeMilestone={async(id,value)=>{await mutate(()=>setMilestoneCompleted(id,value))}} deleteItem={async(kind,id)=>{await mutate(()=>deleteProjectItem(kind,id))}} associateTask={async(taskId,projectId)=>{await mutate(()=>associateTask(taskId,projectId))}} saveTask={t=>mutate(()=>saveTask(t))} completeTask={completeTask} saveFile={f=>mutate(()=>saveProjectFile(f))} openFile={async id=>{try{await openProjectFile(id)}catch(e){setError(String(e))}}} saveJournal={j=>mutate(()=>saveJournalEntry(j))}/>
       : page === 'Focus Sessions' ? <FocusPage data={workspace} initialTaskId={focusTask} initialContext={focusContext} contextText={contextText} courseLabel={courseCode} taskLabel={academicLabel} defaults={async (d, b) => mutate(() => setFocusDefaults(d, b))} action={actFocus}/>
@@ -166,6 +189,6 @@ export default function App() {
       : page === 'Customization' ? <CustomizationPage data={workspace} goTo={go} state={snapshot.companion.state} reducedMotion={snapshot.preferences.reducedMotion} equip={async (id, equipped) => { await mutate(() => equipCosmetic(id, equipped)); }}/>
       : page === 'Achievements' ? <AchievementsPage data={workspace} goTo={go}/>
       : page === 'About and Updates' ? <div className="page-panel"><h1>About CivilDesk</h1><p>A local-first workspace for school, personal planning and engineering work. Your data stays on this computer.</p><div className="roadmap"><h2>What works today</h2><p>Tasks, a unified calendar, focus sessions, engineering projects, weekly challenges and skills, reminders, and Pip with achievements and wardrobe.</p><h2>What comes next</h2><p>Course management, notes, portfolio tools and new Pip cosmetics arrive in later milestones. Nothing in the sidebar is a placeholder.</p></div></div>
-      : <MyDay name={snapshot.preferences.displayName} academic={academic} study={study} openCoursework={openCoursework} openStudyBlock={openStudyBlock} startBlock={startBlock} data={workspace} projects={projects} challenges={challenges} complete={completeTask} goTo={go} newTask={() => { setStartNewTask(true); setPage('Tasks'); }} startFocus={id => { setFocusTask(id ?? ''); go('Focus Sessions'); }}/>}
+      : <MyDay personal={personal} personalOps={personalOps} run={runAcademic} openPersonal={openPersonal} onProgress={() => pip('TASK_COMPLETED')} name={snapshot.preferences.displayName} academic={academic} study={study} openCoursework={openCoursework} openStudyBlock={openStudyBlock} startBlock={startBlock} data={workspace} projects={projects} challenges={challenges} complete={completeTask} goTo={go} newTask={() => { setStartNewTask(true); setPage('Tasks'); }} startFocus={id => { setFocusTask(id ?? ''); go('Focus Sessions'); }}/>}
   </div></main></div>;
 }

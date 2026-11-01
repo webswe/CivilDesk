@@ -10,20 +10,29 @@ import type { StudyBlock, StudyData } from './services/study';
 import { agendaStudy, blockState, timeRange } from './domain/study';
 import { Play as PlayIcon } from 'lucide-react';
 import { contextLabel, courseworkItems, itemFor } from './domain/academic';
+import type { PersonalData } from './services/personal';
+import { prioritiesFor } from './domain/personal';
+import { DailyPriorities } from './personal/DailyPriorities';
+import { TodayHabits } from './personal/TodayHabits';
+import type { PersonalOps, PersonalTab, Run } from './personal/shared';
 
 function greeting(now: Date): string { const h = now.getHours(); return h < 5 ? 'Still up' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'; }
 
 interface Props {
+  personal: PersonalData; personalOps: PersonalOps; run: Run; openPersonal: (tab: PersonalTab) => void; onProgress: () => void;
   name: string; academic: AcademicData; study: StudyData; openStudyBlock: (blockId: string) => void; startBlock: (block: StudyBlock) => void; openCoursework: (taskId: string) => void; data: WorkspaceData; projects: ProjectsData; challenges: ChallengeData;
   complete: (id: string, value: boolean) => Promise<void>;
   goTo: (page: string) => void; newTask: () => void; startFocus: (taskId: string | null) => void;
 }
-export function MyDay({ name, academic, study, openStudyBlock, startBlock, openCoursework, data, projects, challenges, complete, goTo, newTask, startFocus }: Props) {
+export function MyDay({ personal, personalOps, run, openPersonal, onProgress, name, academic, study, openStudyBlock, startBlock, openCoursework, data, projects, challenges, complete, goTo, newTask, startFocus }: Props) {
   const now = new Date();
   const coursework = courseworkItems(data.tasks, academic);
   const areaText = (t: Task) => contextLabel(itemFor(coursework, t.id)) || areaLabels[taskArea(t.category, Boolean(t.projectId))];
   const agenda = buildAgenda(data, projects, challenges, now);
   const dueNow: Task[] = [...agenda.overdue, ...agenda.todayTasks];
+  // Tasks already shown under "Today's priorities" are not listed twice. A priority never changes when a task is due.
+  const planned = new Set(prioritiesFor(agenda.today, personal.priorities, data.tasks).map(t => t.id));
+  const unplanned = dueNow.filter(t => !planned.has(t.id));
   const remaining = dueNow.length;
   const total = remaining + agenda.doneToday;
   const dayStudy = agendaStudy(study, now);
@@ -48,10 +57,11 @@ export function MyDay({ name, academic, study, openStudyBlock, startBlock, openC
         <h2 id="today-heading">Today</h2>
         {nothingToday ? <p className="quiet-note">Nothing scheduled and nothing due. {total > 0 ? 'Everything planned for today is done.' : 'Enjoy the open space, or plan something.'}</p>
           : <>{agenda.schedule.length > 0 && <ul className="day-list" aria-label="Today's schedule">{agenda.schedule.map(e => <li key={e.key} className="day-row event"><span className="day-time">{e.time ?? 'All day'}</span><span className="day-row-text"><strong>{e.title}</strong>{e.time && <small>{e.note}</small>}</span></li>)}</ul>}
-            {remaining > 0 && <ul className="day-list" aria-label="Tasks for today">{dueNow.map(row)}</ul>}
+            {unplanned.length > 0 && <ul className="day-list" aria-label="Tasks for today">{unplanned.map(row)}</ul>}
             {dayStudy.today.length > 0 && <ul className="day-list" aria-label="Study blocks today">{dayStudy.today.map(b => { const missed = blockState(b, study.sessions, now) === 'missed'; const label = b.title || 'Study session';
               return <li key={b.id} className="day-row study"><span className="day-time">{b.startTime}</span><span className="day-row-text"><strong>{label}</strong><small><button className="context-link" aria-label={'Open study block ' + label} onClick={() => openStudyBlock(b.id)}>{'Study · ' + courseCode(b.courseId)}</button>{' · ' + timeRange(b) + (missed ? ' · Earlier today' : '')}</small></span>
                 <button className="soft-button" aria-label={'Start studying ' + label} onClick={() => startBlock(b)}><PlayIcon size={13}/> Start</button></li>; })}</ul>}</>}
+        <DailyPriorities tasks={data.tasks} personal={personal} today={agenda.today} ops={personalOps} run={run} complete={complete} startFocus={id => startFocus(id)} label="Today's priorities"/>
         {total > 0 && <div className="day-progress" aria-label="Today's progress"><progress max={total} value={agenda.doneToday} aria-label="Tasks completed today"/><span>{agenda.doneToday} of {total} done{agenda.focusMinutesToday > 0 ? ' · ' + agenda.focusMinutesToday + ' min focused' : ''}</span></div>}
         {total === 0 && agenda.focusMinutesToday > 0 && <p className="quiet-note">{agenda.focusMinutesToday} min focused today.</p>}
         <button className="text-link" onClick={() => goTo('Tasks')}>All tasks <ChevronRight size={13}/></button>
@@ -63,6 +73,7 @@ export function MyDay({ name, academic, study, openStudyBlock, startBlock, openC
             : <p className="quiet-note">Nothing due in the next week.</p>}
           <button className="text-link" onClick={() => goTo('Calendar')}>Open calendar <ChevronRight size={13}/></button>
         </section>
+        <TodayHabits personal={personal} today={agenda.today} ops={personalOps} run={run} onProgress={onProgress} openPersonal={openPersonal} headingId="habits-heading"/>
         {agenda.activeChallenge && <section aria-labelledby="eng-heading">
           <h2 id="eng-heading">In progress</h2>
           <button className="inline-card" onClick={() => goTo('Weekly Challenges')}><span><strong>{agenda.activeChallenge.title}</strong><small>Engineering challenge · {agenda.activeChallenge.checks}/{agenda.activeChallenge.total} checks</small></span><ChevronRight size={16}/></button>

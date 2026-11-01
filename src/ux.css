@@ -164,3 +164,44 @@
 .calendar-chip.study { background: #3f5e66; color: #e8f6f8; }
 .day-row.study .day-time { color: #9fd0d8; }
 @media (max-width: 760px) { .goal-row { flex-wrap: wrap; } .goal-row progress { width: 100%; order: 3; } }
+
+/* Phase 4C: personal productivity */
+.personal-views { margin: 14px 0 4px; }
+.personal-overview { display: grid; gap: 22px; margin: 18px 0 6px; }
+.personal-overview h2, .priorities h2 { font-size: 16px; margin-bottom: 6px; }
+.priority-add { margin: 10px 0 4px; }
+.priority-add select { min-height: 36px; padding: 6px 10px; width: min(100%, 380px); }
+.carry-over { margin: 8px 0 0; }
+.priority-toggle.on { color: #e5b8c2; }
+.day-row-text.task-done strong { text-decoration: line-through; opacity: .7; }
+.overview-summary { margin: 0; }
+.inline-link { display: inline; margin: 0; }
+.recurring-section { margin-top: 0; }
+.goal-item, .habit-item, .routine-item, .recurring-item { list-style: none; }
+.goal-title { font-size: 13.5px; font-weight: 600; text-align: left; text-decoration: none; }
+.goal-title:hover, .goal-title:focus-visible { text-decoration: underline; }
+.goal-detail { padding: 4px 6px 14px 14px; border-bottom: 1px solid #493a45; display: grid; gap: 6px; }
+.goal-detail h3 { font-size: 13px; margin: 10px 0 2px; color: #dbc0cb; }
+.voided { text-decoration: line-through; opacity: .6; }
+.habit-days { display: flex; gap: 4px; flex-wrap: wrap; margin: 4px 0; }
+.habit-day { width: 30px; height: 30px; border-radius: 8px; border: 1px solid #54414c; background: #30262e; color: #cbb4bf; font-size: 12px; padding: 0; }
+.habit-day.done { background: #644551; color: #fff1f2; border-color: #a87486; }
+.task-check.checked { background: #644551; border-color: #d9a4b1; color: #fff1f2; display: inline-grid; place-items: center; }
+.weekday-picker { border: 0; padding: 0; margin: 12px 0 0; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.weekday-picker legend { font-size: 12px; margin-bottom: 6px; padding: 0; }
+.weekday-chip { position: relative; display: inline-flex; margin: 0; }
+.weekday-chip input { position: absolute; opacity: 0; inset: 0; margin: 0; width: 100%; height: 100%; cursor: pointer; }
+.weekday-chip span { display: inline-block; padding: 6px 10px; border-radius: 8px; border: 1px solid #54414c; background: #30262e; font-size: 12px; color: #cbb4bf; }
+.weekday-chip input:checked + span { background: #644551; border-color: #a87486; color: #fff1f2; }
+.weekday-chip input:focus-visible + span { outline: 2px solid #e5b8c2; outline-offset: 2px; }
+.routine-run { padding: 4px 6px 12px 14px; border-bottom: 1px solid #493a45; }
+.routine-steps { list-style: none; margin: 6px 0 10px; padding: 0; display: grid; gap: 4px; }
+.routine-step { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: #f5eff0; }
+.step-done { text-decoration: line-through; opacity: .7; }
+.routine-done { margin: 2px 0 0 6px; }
+.week-nav { align-items: center; margin: 14px 0 6px; }
+.review-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 6px 22px; margin-top: 10px; }
+.review-grid h2 { font-size: 15px; margin: 14px 0 4px; }
+.review-grid p { margin-bottom: 4px; font-size: 13px; }
+.skipped-note { margin: 0 0 6px 6px; font-size: 12px; }
+.calendar-chip.routine { background: #4f4561; color: #efe8fa; }

@@ -20,6 +20,8 @@ const scopeCopy: Record<TaskScope, { title: string; blurb: string; empty: string
 export interface TaskListExtras {
   /** Tasks linked to a course are always School work, whatever their stored category says. */
   academicIds?: Set<string>;
+  /** Rendered directly under the page heading (the Personal workspace tabs). */
+  tabs?: ReactNode;
   /** Rendered between the area switcher and the list (the School workspace). */
   above?: ReactNode;
   /** Tasks already shown by `above` are left out of the list so nothing appears twice. */
@@ -51,6 +53,7 @@ export function TasksPage({ data, scope, startWithNew = false, onScope, save, re
   const openCount = (s: TaskScope) => data.tasks.filter(t => !t.completedAtMs && (s === 'all' || areaOf(t) === s)).length;
   const customCategory = draft && draft.category && !areaOrder.some(a => areaLabels[a] === draft.category) ? draft.category : '';
   return <div className="page-panel wide-panel"><div className="page-head"><div><h1>{copy.title}</h1><p>{copy.blurb}</p></div><button className="primary-button" onClick={() => setDraft(taskDraft(undefined, scope === 'all' ? 'personal' : scope))}><Plus size={16}/> New task</button></div>
+    {extras.tabs}
     <div className="segmented" role="group" aria-label="Task area">{(['all', ...areaOrder] as TaskScope[]).map(s => <button key={s} className={scope === s ? 'active' : ''} aria-pressed={scope === s} onClick={() => onScope(s)}>{s === 'all' ? 'All' : areaLabels[s]}<span>{openCount(s)}</span></button>)}</div>
     {extras.above}
     {extras.listHeading && <h2 className="list-heading">{extras.listHeading}</h2>}
