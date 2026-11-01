@@ -155,9 +155,9 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), String> {
     let version: u32 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|e| format!("Could not read database schema version: {e}"))?;
-    if version > 8 {
+    if version > 9 {
         return Err(format!(
-            "Database schema version {version} is newer than supported version 8"
+            "Database schema version {version} is newer than supported version 9"
         ));
     }
     if version == 0 {
@@ -429,6 +429,43 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), String> {
             PRAGMA user_version = 8; COMMIT;")
             .map_err(|e| e.to_string())?;
     }
+    if version < 9 {
+        conn.execute_batch("BEGIN IMMEDIATE;
+            CREATE TABLE portfolio_case_studies (
+                project_id TEXT PRIMARY KEY NOT NULL REFERENCES engineering_projects(id) ON DELETE CASCADE,
+                team_kind TEXT NOT NULL DEFAULT 'individual' CHECK(team_kind IN ('individual','team')),
+                background TEXT NOT NULL DEFAULT '', scope TEXT NOT NULL DEFAULT '', constraints TEXT NOT NULL DEFAULT '',
+                approach TEXT NOT NULL DEFAULT '', methodology TEXT NOT NULL DEFAULT '',
+                challenges TEXT NOT NULL DEFAULT '', solutions TEXT NOT NULL DEFAULT '',
+                deliverables TEXT NOT NULL DEFAULT '', outcomes TEXT NOT NULL DEFAULT '',
+                created_at_ms INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL
+            );
+            CREATE TABLE portfolio_tools (
+                id TEXT PRIMARY KEY NOT NULL,
+                project_id TEXT NOT NULL REFERENCES engineering_projects(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL CHECK(kind IN ('software','skill')),
+                name TEXT NOT NULL COLLATE NOCASE CHECK(length(trim(name)) > 0),
+                skill_id TEXT REFERENCES engineering_skills(id) ON DELETE SET NULL,
+                position INTEGER NOT NULL, created_at_ms INTEGER NOT NULL,
+                UNIQUE(project_id, kind, name)
+            );
+            CREATE TABLE portfolio_gallery (
+                id TEXT PRIMARY KEY NOT NULL,
+                project_id TEXT NOT NULL REFERENCES engineering_projects(id) ON DELETE CASCADE,
+                file_id TEXT NOT NULL REFERENCES project_files(id) ON DELETE CASCADE,
+                caption TEXT NOT NULL DEFAULT '', alt_text TEXT NOT NULL DEFAULT '',
+                position INTEGER NOT NULL, created_at_ms INTEGER NOT NULL,
+                UNIQUE(project_id, file_id)
+            );
+            CREATE TABLE portfolio_milestones (
+                project_id TEXT NOT NULL REFERENCES engineering_projects(id) ON DELETE CASCADE,
+                milestone_id TEXT NOT NULL REFERENCES project_milestones(id) ON DELETE CASCADE,
+                PRIMARY KEY(project_id, milestone_id)
+            );
+            CREATE INDEX portfolio_gallery_order ON portfolio_gallery(project_id, position);
+            PRAGMA user_version = 9; COMMIT;")
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -491,7 +528,7 @@ mod tests {
                     .unwrap()
                     .pragma_query_value(None, "user_version", |row| row.get(0))
                     .unwrap();
-            assert_eq!(version, 8);
+            assert_eq!(version, 9);
         }
         std::fs::remove_file(path).unwrap();
     }
@@ -511,7 +548,7 @@ mod tests {
         let path = unique_test_path();
         {
             let connection = Connection::open(&path).unwrap();
-            connection.execute_batch("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO app_state VALUES ('marker', 'keep'); PRAGMA user_version = 9;").unwrap();
+            connection.execute_batch("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO app_state VALUES ('marker', 'keep'); PRAGMA user_version = 10;").unwrap();
         }
         assert!(Database::open(&path).is_err());
         let connection = Connection::open(&path).unwrap();
@@ -547,7 +584,7 @@ mod tests {
                 .unwrap()
                 .pragma_query_value(None, "user_version", |r| r.get(0))
                 .unwrap();
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
         drop(db);
         std::fs::remove_file(path).unwrap();
     }
@@ -576,7 +613,7 @@ mod tests {
         let version: i64 = c
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 8);
+        assert_eq!(version, 9);
         drop(c);
         drop(db);
         std::fs::remove_file(path).unwrap();

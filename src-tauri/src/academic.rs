@@ -621,7 +621,7 @@ mod tests {
         // Build a genuine v5 database, then upgrade it.
         c.execute_batch("PRAGMA user_version = 0;").unwrap();
         migrate(&c).unwrap();
-        c.execute_batch("DROP TABLE daily_priorities; DROP TABLE recurrence_occurrences; DROP TABLE recurrence_rules; DROP TABLE routine_execution_steps; DROP TABLE routine_executions; DROP TABLE routine_steps; DROP TABLE routines; DROP TABLE habit_checkins; DROP TABLE habit_schedules; DROP TABLE habits; DROP TABLE goal_entries; DROP TABLE goal_targets; DROP TABLE goals;
+        c.execute_batch("DROP TABLE portfolio_milestones; DROP TABLE portfolio_gallery; DROP TABLE portfolio_tools; DROP TABLE portfolio_case_studies; DROP TABLE daily_priorities; DROP TABLE recurrence_occurrences; DROP TABLE recurrence_rules; DROP TABLE routine_execution_steps; DROP TABLE routine_executions; DROP TABLE routine_steps; DROP TABLE routines; DROP TABLE habit_checkins; DROP TABLE habit_schedules; DROP TABLE habits; DROP TABLE goal_entries; DROP TABLE goal_targets; DROP TABLE goals;
             DROP TABLE study_goals; DROP TABLE study_blocks; DROP TABLE focus_sessions;
             CREATE TABLE focus_sessions (
                 id TEXT PRIMARY KEY NOT NULL, task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,

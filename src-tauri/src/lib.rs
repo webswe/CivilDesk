@@ -4,6 +4,7 @@ mod challenges;
 mod dates;
 mod persistence;
 mod personal;
+mod portfolio;
 mod productivity;
 mod projects;
 mod study;
@@ -15,6 +16,7 @@ use persistence::{AppSnapshot, Database};
 use personal::{
     GoalEntryInput, GoalInput, HabitInput, PersonalData, RecurrenceInput, RoutineInput,
 };
+use portfolio::{CaseStudyInput, ExportResult, PortfolioData, PreviewResult, ToolInput};
 use productivity::{TaskInput, WorkspaceData};
 use projects::{FileReference, JournalEntry, Milestone, Project, ProjectsData};
 use study::{StudyBlockInput, StudyData, StudyGoal};
@@ -520,6 +522,88 @@ fn set_daily_priorities(
         .database()?
         .set_daily_priorities(&date, &task_ids, &today)
 }
+#[tauri::command]
+fn load_portfolio(state: tauri::State<'_, RuntimeState>) -> Result<PortfolioData, String> {
+    state.database()?.portfolio()
+}
+#[tauri::command]
+fn save_case_study(
+    state: tauri::State<'_, RuntimeState>,
+    input: CaseStudyInput,
+) -> Result<(), String> {
+    state.database()?.save_case_study(input)
+}
+#[tauri::command]
+fn set_portfolio_tools(
+    state: tauri::State<'_, RuntimeState>,
+    project_id: String,
+    tools: Vec<ToolInput>,
+) -> Result<(), String> {
+    state.database()?.set_portfolio_tools(&project_id, tools)
+}
+#[tauri::command]
+fn set_portfolio_milestones(
+    state: tauri::State<'_, RuntimeState>,
+    project_id: String,
+    milestone_ids: Vec<String>,
+) -> Result<(), String> {
+    state
+        .database()?
+        .set_portfolio_milestones(&project_id, milestone_ids)
+}
+#[tauri::command]
+fn add_gallery_image(
+    state: tauri::State<'_, RuntimeState>,
+    project_id: String,
+    path: String,
+) -> Result<(), String> {
+    state.database()?.add_gallery_image(&project_id, &path)
+}
+#[tauri::command]
+fn save_gallery_item(
+    state: tauri::State<'_, RuntimeState>,
+    id: String,
+    caption: String,
+    alt_text: String,
+) -> Result<(), String> {
+    state
+        .database()?
+        .save_gallery_item(&id, &caption, &alt_text)
+}
+#[tauri::command]
+fn reorder_gallery(
+    state: tauri::State<'_, RuntimeState>,
+    project_id: String,
+    ids: Vec<String>,
+) -> Result<(), String> {
+    state.database()?.reorder_gallery(&project_id, ids)
+}
+#[tauri::command]
+fn remove_gallery_item(state: tauri::State<'_, RuntimeState>, id: String) -> Result<(), String> {
+    state.database()?.remove_gallery_item(&id)
+}
+#[tauri::command]
+fn gallery_image_data(state: tauri::State<'_, RuntimeState>, id: String) -> Result<String, String> {
+    state.database()?.gallery_image_data(&id)
+}
+#[tauri::command]
+fn preview_case_study(
+    state: tauri::State<'_, RuntimeState>,
+    project_id: String,
+) -> Result<PreviewResult, String> {
+    state.database()?.preview_case_study(&project_id)
+}
+#[tauri::command]
+fn export_case_study(
+    state: tauri::State<'_, RuntimeState>,
+    project_id: String,
+    destination: String,
+    overwrite: bool,
+) -> Result<ExportResult, String> {
+    state
+        .database()?
+        .export_case_study(&project_id, &destination, overwrite)
+}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -564,6 +648,17 @@ pub fn run() {
             save_reminder_preferences,
             claim_reminder,
             load_projects,
+            load_portfolio,
+            save_case_study,
+            set_portfolio_tools,
+            set_portfolio_milestones,
+            add_gallery_image,
+            save_gallery_item,
+            reorder_gallery,
+            remove_gallery_item,
+            gallery_image_data,
+            preview_case_study,
+            export_case_study,
             save_project,
             save_milestone,
             set_milestone_completed,
