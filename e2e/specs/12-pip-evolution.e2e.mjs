@@ -104,7 +104,7 @@ describe('pip evolution (real application)', () => {
   });
 
   it('keeps Pip visible, readable and clickable under reduced motion, and remembers the choice', async () => {
-    await go('Settings');
+    await $('//button[@title="Settings"]').click(); // Settings lives in the sidebar utility group, outside the main navigation that go() searches
     await $('//label[contains(normalize-space(.),"Reduced motion")]//input').click();
     await browser.waitUntil(async () => browser.execute(() => document.documentElement.classList.contains('reduced-motion')), { timeout: 5000, timeoutMsg: 'Reduced motion was not applied.' });
     await expect(dockArt()).toBeDisplayed();
