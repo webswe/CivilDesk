@@ -23,7 +23,7 @@ e2e/
   lib/guard.mjs                     the only code that deletes anything (see section 3)
   lib/app.mjs                       selectors and helpers: role/label/text based, no coordinates
   lib/db.mjs                        read-only SQLite inspection, expected schema version from persistence.rs
-  specs/01..09-*.e2e.mjs            acceptance specs
+  specs/01..10-*.e2e.mjs            acceptance specs
   scripts/verify-results.mjs        final gate: SQLite health + JUnit failures
 scripts/check-e2e-config.mjs        isolation checks (also run in normal CI)
 ```
@@ -69,7 +69,7 @@ Locally use `CIVILDESK_E2E_ALLOW_RESET=1` and `CARGO_TARGET_DIR` if your target 
 | Navigation | 04 | grouping, no placeholders, Engineering expand, breadcrumbs, keyboard Tab/Enter, narrow icon rail (700 px), collapsed state survives restart |
 | Engineering | 05 | nine challenges, pathways, Skills, start/check/complete, challenge-to-project, project journal, Journal page, no Pip XP change |
 | Pip | 06 | dock pet/open, Pip page, Wardrobe, Achievements, XP 25 persisted, hide/show persisted |
-| Persistence | all | restart in 01/04/06; after every session SQLite `quick_check` is `ok` and `user_version` equals the highest migration in `persistence.rs` (currently 5), i.e. no unexpected or missing migration |
+| Persistence | all | restart in 01/04/06; after every session SQLite `quick_check` is `ok` and `user_version` equals the highest migration in `persistence.rs` (currently 8), i.e. no unexpected or missing migration |
 
 ## 7. Not automated (manual checklist)
 
