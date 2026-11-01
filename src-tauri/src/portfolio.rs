@@ -728,8 +728,19 @@ fn validate_destination(dest: &str) -> Result<PathBuf, String> {
     if meta.file_type().is_symlink() || !meta.is_dir() {
         return Err("The destination must be an existing, ordinary folder".into());
     }
-    path.canonicalize()
-        .map_err(|_| "The destination folder cannot be used".to_string())
+    let resolved = path
+        .canonicalize()
+        .map_err(|_| "The destination folder cannot be used".to_string())?;
+    Ok(plain_windows_path(resolved))
+}
+/// `canonicalize` returns the verbatim form (`\?\C:\...`) on Windows; show and use the ordinary drive path when one
+/// exists. UNC and other verbatim forms are left untouched.
+fn plain_windows_path(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
+        _ => path,
+    }
 }
 
 impl Database {
@@ -1203,6 +1214,22 @@ mod tests {
     }
 
     #[test]
+    fn verbatim_drive_prefix_is_removed_but_unc_is_kept() {
+        assert_eq!(
+            plain_windows_path(PathBuf::from(r"\\?\C:\Users\a")),
+            PathBuf::from(r"C:\Users\a")
+        );
+        assert_eq!(
+            plain_windows_path(PathBuf::from(r"\\?\UNC\srv\share")),
+            PathBuf::from(r"\\?\UNC\srv\share")
+        );
+        assert_eq!(
+            plain_windows_path(PathBuf::from("/tmp/x")),
+            PathBuf::from("/tmp/x")
+        );
+    }
+
+    #[test]
     fn base64_matches_known_vectors() {
         assert_eq!(base64(b""), "");
         assert_eq!(base64(b"f"), "Zg==");
@@ -1593,6 +1620,102 @@ mod tests {
             .export_case_study("p1", &out.to_string_lossy(), false)
             .unwrap();
         assert_eq!(result.files, vec!["index.html"]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Manual inspection helper: writes a realistic export so it can be opened in a browser. Does nothing unless
+    /// `CIVILDESK_SAMPLE_EXPORT_DIR` (destination) and `CIVILDESK_SAMPLE_IMAGES` (semicolon-separated image paths) are set.
+    #[test]
+    fn sample_export_for_manual_inspection() {
+        let (Ok(dest), Ok(images)) = (
+            std::env::var("CIVILDESK_SAMPLE_EXPORT_DIR"),
+            std::env::var("CIVILDESK_SAMPLE_IMAGES"),
+        ) else {
+            return;
+        };
+        let (db, dir) = database();
+        project(&db, "p1", "Parking Lot Grading Study");
+        let mut i = input("p1");
+        i.team_kind = "team".into();
+        i.background = "The lot behind the school ponded after storms.
+
+Survey points were provided by the instructor."
+            .into();
+        i.scope = "Existing ground surface, proposed grading and a drainage layout.".into();
+        i.constraints = "Maximum 5% slope; maintain the existing curb line.".into();
+        i.approach =
+            "Built an existing-ground surface and a proposed surface with a 1.5% minimum slope."
+                .into();
+        i.methodology = "Iterated the grading with feature lines and checked drainage with a catchment analysis.".into();
+        i.challenges = "Low points near the entrance trapped water.".into();
+        i.solutions = "Moved the high point and added a swale.".into();
+        i.deliverables = "Plan sheet, profile sheet and a grading memo.".into();
+        i.outcomes = "Positive drainage across the lot in the final model.".into();
+        i.decisions = "Chose a swale over an inlet to keep the curb line.".into();
+        i.lessons = "Check the survey datum before building surfaces.".into();
+        db.save_case_study(i).unwrap();
+        db.set_portfolio_tools(
+            "p1",
+            vec![
+                ToolInput {
+                    kind: "software".into(),
+                    name: "Civil 3D".into(),
+                    skill_id: None,
+                },
+                ToolInput {
+                    kind: "software".into(),
+                    name: "AutoCAD".into(),
+                    skill_id: None,
+                },
+                ToolInput {
+                    kind: "skill".into(),
+                    name: "Grading".into(),
+                    skill_id: None,
+                },
+                ToolInput {
+                    kind: "skill".into(),
+                    name: "Site planning".into(),
+                    skill_id: None,
+                },
+            ],
+        )
+        .unwrap();
+        for (n, img) in images.split(';').filter(|x| !x.is_empty()).enumerate() {
+            db.add_gallery_image("p1", img).unwrap();
+            let g = db.portfolio().unwrap().gallery;
+            db.save_gallery_item(
+                &g[n].id,
+                &format!("Figure {}", n + 1),
+                &format!("Sample figure {}", n + 1),
+            )
+            .unwrap();
+        }
+        db.save_milestone(crate::projects::Milestone {
+            id: "m1".into(),
+            project_id: "p1".into(),
+            title: "Survey received".into(),
+            description: String::new(),
+            target_date: "2026-09-10".into(),
+            completed_at_ms: Some(1),
+            created_at_ms: 0,
+            updated_at_ms: 0,
+        })
+        .unwrap();
+        db.save_milestone(crate::projects::Milestone {
+            id: "m2".into(),
+            project_id: "p1".into(),
+            title: "Final sheets issued".into(),
+            description: String::new(),
+            target_date: "2026-10-12".into(),
+            completed_at_ms: None,
+            created_at_ms: 0,
+            updated_at_ms: 0,
+        })
+        .unwrap();
+        db.set_portfolio_milestones("p1", vec!["m1".into(), "m2".into()])
+            .unwrap();
+        let result = db.export_case_study("p1", &dest, true).unwrap();
+        println!("sample export written to {}", result.folder);
         let _ = std::fs::remove_dir_all(dir);
     }
 
