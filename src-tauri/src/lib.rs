@@ -1,7 +1,9 @@
 mod academic;
 mod calendar;
 mod challenges;
+mod dates;
 mod persistence;
+mod personal;
 mod productivity;
 mod projects;
 mod study;
@@ -10,6 +12,9 @@ use academic::{AcademicData, CourseInput, CourseworkInput, SemesterInput};
 use calendar::CalendarInput;
 use challenges::ChallengeSettings;
 use persistence::{AppSnapshot, Database};
+use personal::{
+    GoalEntryInput, GoalInput, HabitInput, PersonalData, RecurrenceInput, RoutineInput,
+};
 use productivity::{TaskInput, WorkspaceData};
 use projects::{FileReference, JournalEntry, Milestone, Project, ProjectsData};
 use study::{StudyBlockInput, StudyData, StudyGoal};
@@ -361,6 +366,160 @@ fn unlink_coursework(state: tauri::State<'_, RuntimeState>, task_id: String) -> 
     state.database()?.unlink_coursework(&task_id)
 }
 
+#[tauri::command]
+fn load_personal(state: tauri::State<'_, RuntimeState>) -> Result<PersonalData, String> {
+    state.database()?.personal()
+}
+#[tauri::command]
+fn save_goal(
+    state: tauri::State<'_, RuntimeState>,
+    goal: GoalInput,
+    today: String,
+) -> Result<(), String> {
+    state.database()?.save_goal(goal, &today)
+}
+#[tauri::command]
+fn set_goal_status(
+    state: tauri::State<'_, RuntimeState>,
+    id: String,
+    status: String,
+) -> Result<(), String> {
+    state.database()?.set_goal_status(&id, &status)
+}
+#[tauri::command]
+fn add_goal_entry(
+    state: tauri::State<'_, RuntimeState>,
+    entry: GoalEntryInput,
+    today: String,
+) -> Result<(), String> {
+    state.database()?.add_goal_entry(entry, &today)
+}
+#[tauri::command]
+fn void_goal_entry(state: tauri::State<'_, RuntimeState>, id: String) -> Result<(), String> {
+    state.database()?.void_goal_entry(&id)
+}
+#[tauri::command]
+fn save_habit(
+    state: tauri::State<'_, RuntimeState>,
+    habit: HabitInput,
+    today: String,
+) -> Result<(), String> {
+    state.database()?.save_habit(habit, &today)
+}
+#[tauri::command]
+fn set_habit_status(
+    state: tauri::State<'_, RuntimeState>,
+    id: String,
+    status: String,
+) -> Result<(), String> {
+    state.database()?.set_habit_status(&id, &status)
+}
+#[tauri::command]
+fn set_habit_checkin(
+    state: tauri::State<'_, RuntimeState>,
+    habit_id: String,
+    date: String,
+    done: bool,
+    today: String,
+) -> Result<(), String> {
+    state
+        .database()?
+        .set_habit_checkin(&habit_id, &date, done, &today)
+}
+#[tauri::command]
+fn save_routine(
+    state: tauri::State<'_, RuntimeState>,
+    routine: RoutineInput,
+) -> Result<(), String> {
+    state.database()?.save_routine(routine)
+}
+#[tauri::command]
+fn set_routine_status(
+    state: tauri::State<'_, RuntimeState>,
+    id: String,
+    status: String,
+) -> Result<(), String> {
+    state.database()?.set_routine_status(&id, &status)
+}
+#[tauri::command]
+fn start_routine(
+    state: tauri::State<'_, RuntimeState>,
+    routine_id: String,
+    execution_id: String,
+    date: String,
+    today: String,
+) -> Result<(), String> {
+    state
+        .database()?
+        .start_routine(&routine_id, &execution_id, &date, &today)
+}
+#[tauri::command]
+fn set_routine_step(
+    state: tauri::State<'_, RuntimeState>,
+    execution_id: String,
+    position: i64,
+    done: bool,
+) -> Result<(), String> {
+    state
+        .database()?
+        .set_routine_step(&execution_id, position, done)
+}
+#[tauri::command]
+fn complete_routine(
+    state: tauri::State<'_, RuntimeState>,
+    execution_id: String,
+) -> Result<(), String> {
+    state.database()?.complete_routine(&execution_id)
+}
+#[tauri::command]
+fn save_recurrence(
+    state: tauri::State<'_, RuntimeState>,
+    rule: RecurrenceInput,
+    today: String,
+) -> Result<(), String> {
+    state.database()?.save_recurrence(rule, &today)
+}
+#[tauri::command]
+fn set_recurrence_status(
+    state: tauri::State<'_, RuntimeState>,
+    id: String,
+    status: String,
+    today: String,
+) -> Result<(), String> {
+    state
+        .database()?
+        .set_recurrence_status(&id, &status, &today)
+}
+#[tauri::command]
+fn skip_occurrence(state: tauri::State<'_, RuntimeState>, task_id: String) -> Result<(), String> {
+    state.database()?.skip_occurrence(&task_id)
+}
+#[tauri::command]
+fn restore_occurrence(
+    state: tauri::State<'_, RuntimeState>,
+    rule_id: String,
+    date: String,
+    today: String,
+) -> Result<(), String> {
+    state
+        .database()?
+        .restore_occurrence(&rule_id, &date, &today)
+}
+#[tauri::command]
+fn generate_recurring(state: tauri::State<'_, RuntimeState>, today: String) -> Result<(), String> {
+    state.database()?.generate_recurring(&today)
+}
+#[tauri::command]
+fn set_daily_priorities(
+    state: tauri::State<'_, RuntimeState>,
+    date: String,
+    task_ids: Vec<String>,
+    today: String,
+) -> Result<(), String> {
+    state
+        .database()?
+        .set_daily_priorities(&date, &task_ids, &today)
+}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -432,7 +591,26 @@ pub fn run() {
             load_study,
             save_study_block,
             set_study_block_cancelled,
-            save_study_goal
+            save_study_goal,
+            load_personal,
+            save_goal,
+            set_goal_status,
+            add_goal_entry,
+            void_goal_entry,
+            save_habit,
+            set_habit_status,
+            set_habit_checkin,
+            save_routine,
+            set_routine_status,
+            start_routine,
+            set_routine_step,
+            complete_routine,
+            save_recurrence,
+            set_recurrence_status,
+            skip_occurrence,
+            restore_occurrence,
+            generate_recurring,
+            set_daily_priorities
         ])
         .run(tauri::generate_context!())
         .expect("CivilDesk could not start");

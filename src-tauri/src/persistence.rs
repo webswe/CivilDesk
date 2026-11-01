@@ -155,9 +155,9 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), String> {
     let version: u32 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|e| format!("Could not read database schema version: {e}"))?;
-    if version > 7 {
+    if version > 8 {
         return Err(format!(
-            "Database schema version {version} is newer than supported version 7"
+            "Database schema version {version} is newer than supported version 8"
         ));
     }
     if version == 0 {
@@ -334,6 +334,101 @@ pub(crate) fn migrate(conn: &Connection) -> Result<(), String> {
             PRAGMA user_version = 7; COMMIT;")
             .map_err(|e| e.to_string())?;
     }
+    if version < 8 {
+        conn.execute_batch("BEGIN IMMEDIATE;
+            CREATE TABLE goals (
+                id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+                kind TEXT NOT NULL CHECK(kind IN ('binary','numeric','periodic')),
+                target INTEGER CHECK(target IS NULL OR target > 0),
+                unit TEXT NOT NULL DEFAULT '',
+                period TEXT CHECK(period IS NULL OR period IN ('daily','weekly','monthly')),
+                start_date TEXT NOT NULL, target_date TEXT,
+                status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','paused','archived','completed')),
+                completed_at_ms INTEGER, created_at_ms INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL,
+                CHECK((kind='binary' AND target IS NULL AND period IS NULL)
+                   OR (kind='numeric' AND target IS NOT NULL AND period IS NULL)
+                   OR (kind='periodic' AND target IS NOT NULL AND period IS NOT NULL))
+            );
+            CREATE TABLE goal_targets (
+                goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE RESTRICT,
+                effective_from TEXT NOT NULL, target INTEGER NOT NULL CHECK(target > 0),
+                PRIMARY KEY(goal_id, effective_from)
+            );
+            CREATE TABLE goal_entries (
+                id TEXT PRIMARY KEY NOT NULL, goal_id TEXT NOT NULL REFERENCES goals(id) ON DELETE RESTRICT,
+                entry_date TEXT NOT NULL, amount INTEGER NOT NULL CHECK(amount BETWEEN 1 AND 1000000000),
+                note TEXT NOT NULL DEFAULT '', created_at_ms INTEGER NOT NULL, voided_at_ms INTEGER
+            );
+            CREATE INDEX goal_entries_goal ON goal_entries(goal_id, entry_date);
+            CREATE TABLE habits (
+                id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','paused','archived')),
+                start_date TEXT NOT NULL, created_at_ms INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL
+            );
+            CREATE TABLE habit_schedules (
+                habit_id TEXT NOT NULL REFERENCES habits(id) ON DELETE RESTRICT,
+                effective_from TEXT NOT NULL,
+                frequency TEXT NOT NULL CHECK(frequency IN ('daily','weekly')),
+                target_count INTEGER NOT NULL CHECK(target_count BETWEEN 1 AND 7),
+                preferred_days TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY(habit_id, effective_from),
+                CHECK(frequency = 'weekly' OR target_count = 1)
+            );
+            CREATE TABLE habit_checkins (
+                habit_id TEXT NOT NULL REFERENCES habits(id) ON DELETE RESTRICT,
+                occurrence_date TEXT NOT NULL, created_at_ms INTEGER NOT NULL,
+                PRIMARY KEY(habit_id, occurrence_date)
+            );
+            CREATE TABLE routines (
+                id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+                schedule_days TEXT NOT NULL DEFAULT '', schedule_time TEXT,
+                status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','paused','archived')),
+                created_at_ms INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL
+            );
+            CREATE TABLE routine_steps (
+                id TEXT PRIMARY KEY NOT NULL, routine_id TEXT NOT NULL REFERENCES routines(id) ON DELETE RESTRICT,
+                position INTEGER NOT NULL, title TEXT NOT NULL
+            );
+            CREATE INDEX routine_steps_routine ON routine_steps(routine_id, position);
+            CREATE TABLE routine_executions (
+                id TEXT PRIMARY KEY NOT NULL, routine_id TEXT NOT NULL REFERENCES routines(id) ON DELETE RESTRICT,
+                occurrence_date TEXT NOT NULL, started_at_ms INTEGER NOT NULL, completed_at_ms INTEGER,
+                UNIQUE(routine_id, occurrence_date)
+            );
+            CREATE TABLE routine_execution_steps (
+                execution_id TEXT NOT NULL REFERENCES routine_executions(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL, step_id TEXT NOT NULL, title TEXT NOT NULL, done_at_ms INTEGER,
+                PRIMARY KEY(execution_id, position)
+            );
+            CREATE TABLE recurrence_rules (
+                id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+                priority TEXT NOT NULL DEFAULT 'normal' CHECK(priority IN ('low','normal','high')),
+                category TEXT NOT NULL DEFAULT 'Personal',
+                frequency TEXT NOT NULL CHECK(frequency IN ('daily','weekly','monthly')),
+                weekdays TEXT NOT NULL DEFAULT '',
+                month_day INTEGER CHECK(month_day IS NULL OR month_day BETWEEN 1 AND 31),
+                start_date TEXT NOT NULL, end_date TEXT, due_time TEXT, reminder_offset_minutes INTEGER,
+                status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','paused','ended')),
+                created_at_ms INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL
+            );
+            CREATE TABLE recurrence_occurrences (
+                rule_id TEXT NOT NULL REFERENCES recurrence_rules(id) ON DELETE RESTRICT,
+                occurrence_date TEXT NOT NULL,
+                task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+                status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','skipped')),
+                created_at_ms INTEGER NOT NULL,
+                PRIMARY KEY(rule_id, occurrence_date)
+            );
+            CREATE UNIQUE INDEX recurrence_occurrence_task ON recurrence_occurrences(task_id) WHERE task_id IS NOT NULL;
+            CREATE TABLE daily_priorities (
+                plan_date TEXT NOT NULL, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL, created_at_ms INTEGER NOT NULL,
+                PRIMARY KEY(plan_date, task_id)
+            );
+            CREATE INDEX daily_priorities_date ON daily_priorities(plan_date, position);
+            PRAGMA user_version = 8; COMMIT;")
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -396,7 +491,7 @@ mod tests {
                     .unwrap()
                     .pragma_query_value(None, "user_version", |row| row.get(0))
                     .unwrap();
-            assert_eq!(version, 7);
+            assert_eq!(version, 8);
         }
         std::fs::remove_file(path).unwrap();
     }
@@ -416,7 +511,7 @@ mod tests {
         let path = unique_test_path();
         {
             let connection = Connection::open(&path).unwrap();
-            connection.execute_batch("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO app_state VALUES ('marker', 'keep'); PRAGMA user_version = 8;").unwrap();
+            connection.execute_batch("CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO app_state VALUES ('marker', 'keep'); PRAGMA user_version = 9;").unwrap();
         }
         assert!(Database::open(&path).is_err());
         let connection = Connection::open(&path).unwrap();
@@ -452,7 +547,7 @@ mod tests {
                 .unwrap()
                 .pragma_query_value(None, "user_version", |r| r.get(0))
                 .unwrap();
-        assert_eq!(version, 7);
+        assert_eq!(version, 8);
         drop(db);
         std::fs::remove_file(path).unwrap();
     }
@@ -481,7 +576,7 @@ mod tests {
         let version: i64 = c
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 7);
+        assert_eq!(version, 8);
         drop(c);
         drop(db);
         std::fs::remove_file(path).unwrap();
