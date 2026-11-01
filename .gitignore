@@ -17,3 +17,4 @@ src-tauri/target/
 *.pfx
 *.p12
 e2e/results/
+src-tauri/gen/

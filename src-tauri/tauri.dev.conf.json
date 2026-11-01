@@ -1,0 +1,23 @@
+{
+  "productName": "CivilDesk Dev",
+  "identifier": "com.webswe.civildesk.dev",
+  "app": {
+    "appDirectoriesOverride": {
+      "data": "$DATA/com.webswe.civildesk.dev",
+      "localData": "$LOCALDATA/com.webswe.civildesk.dev"
+    },
+    "windows": [
+      {
+        "title": "CivilDesk Dev",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 650,
+        "minHeight": 600,
+        "backgroundColor": "#211B20"
+      }
+    ]
+  },
+  "bundle": {
+    "createUpdaterArtifacts": false
+  }
+}
