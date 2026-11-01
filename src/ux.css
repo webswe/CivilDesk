@@ -312,3 +312,24 @@
   .preview-frame { height: 420px; }
   .portfolio-actions { position: static; }
 }
+
+/* Phase 4E: Pip expressions. Everything here is a short, non-looping CSS transform on the existing SVG; nothing flashes. */
+.pip-eyes { transform-box: fill-box; transform-origin: center; animation: pip-blink 6.5s ease-in-out infinite; }
+@keyframes pip-blink { 0%, 93%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.12); } }
+@keyframes pip-tilt { 0%, 100% { transform: rotate(0); } 30%, 70% { transform: rotate(-5deg) translateY(-2px); } }
+@keyframes pip-hop { 0%, 100% { transform: translateY(2px); } 40% { transform: translateY(-9px) rotate(1deg); } }
+@keyframes pip-stretch { 0% { transform: scale(1, .96); } 50% { transform: scale(.98, 1.05); } 100% { transform: scale(1); } }
+.pip-art.curious .pip-float { animation: pip-tilt 3s ease-in-out 1; }
+.pip-art.happy .pip-float { animation: pip-bob 2.4s ease-in-out 1; }
+.pip-art.celebrating .pip-float { animation: pip-hop .9s ease-out 3; }
+.pip-art.waking .pip-float { animation: pip-stretch 1.2s ease-out 1; }
+.pip-art.focused .pip-float, .pip-art.relaxed .pip-float { animation: pip-breathe 5s ease-in-out infinite; }
+.pip-art.focused .pip-eyes { animation-duration: 9s; }
+/* Reduced motion (the app setting or the operating system) removes movement entirely; the face and caption still show the state. */
+.pip-art.still .pip-float, .pip-art.still .pip-eyes, .pip-art.still .pip-aura, .reduced-motion .pip-art * { animation: none !important; }
+/* A hidden or minimised window should not keep animating. */
+.window-hidden .pip-art * { animation-play-state: paused !important; }
+.pip-dock-text small[aria-live] { color: #e5b8c2; }
+.pip-message { min-height: 18px; margin: 4px 0 0; color: #e5b8c2; font-size: var(--fs-xs); }
+.cosmetic-card small { display: block; }
+.achievement-card .progress-note { display: block; margin-top: 6px; color: #d5bfc8; font-size: var(--fs-xs); }

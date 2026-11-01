@@ -19,7 +19,7 @@ export interface FocusSession {
 export interface FocusContext { courseId?: string | null; studyBlockId?: string | null }
 export interface RewardEvent { id: string; kind: string; sourceId: string; occurredAtMs: number; xp: number }
 export interface Progression {
-  xp: number; level: number; earned: string[]; unlocked: string[]; styleId: 'classic' | 'berry';
+  xp: number; level: number; earned: string[]; unlocked: string[]; styleId: 'classic' | 'berry' | 'dusk' | 'sage';
   scarf: boolean; headphones: boolean; history: RewardEvent[];
 }
 export interface WorkspaceData {
@@ -29,13 +29,17 @@ export interface WorkspaceData {
 export const achievementDefinitions = [
   { id: 'first_task', title: 'First step', requirement: 'Complete your first task', cosmetic: 'Rosewood scarf' },
   { id: 'five_tasks', title: 'Building momentum', requirement: 'Complete five different tasks', cosmetic: 'Berry Pip style' },
+  { id: 'ten_tasks', title: 'Steady hands', requirement: 'Complete ten different tasks', cosmetic: 'Dusk Pip style' },
   { id: 'first_focus', title: 'Deep work begins', requirement: 'Complete one focus session', cosmetic: null },
   { id: 'three_focus', title: 'In the zone', requirement: 'Complete three focus sessions', cosmetic: 'Headphones' },
+  { id: 'ten_focus', title: 'Deep focus', requirement: 'Complete ten focus sessions', cosmetic: 'Sage Pip style' },
   { id: 'level_five', title: 'Steady progress', requirement: 'Reach level 5', cosmetic: 'Celebration aura' },
 ] as const;
 export const cosmeticDefinitions = [
   { id: 'classic', title: 'Classic Pip', requirement: 'Available from the start', slot: 'style' },
   { id: 'berry', title: 'Berry Pip', requirement: 'Complete five different tasks', slot: 'style' },
+  { id: 'dusk', title: 'Dusk Pip', requirement: 'Complete ten different tasks', slot: 'style' },
+  { id: 'sage', title: 'Sage Pip', requirement: 'Complete ten focus sessions', slot: 'style' },
   { id: 'scarf', title: 'Rosewood scarf', requirement: 'Complete your first task', slot: 'accessory' },
   { id: 'headphones', title: 'Focus headphones', requirement: 'Complete three focus sessions', slot: 'accessory' },
 ] as const;

@@ -419,7 +419,7 @@ impl Database {
             }
         }
         match id {
-            "classic" | "berry" => {
+            "classic" | "berry" | "dusk" | "sage" => {
                 c.execute(
                     "UPDATE pip_customization SET style_id=?1 WHERE id=1",
                     [if equipped { id } else { "classic" }],
@@ -478,12 +478,19 @@ fn award(tx: &Transaction<'_>, kind: &str, source: &str, xp: i64, now: i64) -> R
         if count == 5 {
             achievement(tx, "five_tasks", &event, Some("berry"), now)?
         }
+        // `>=` rather than `==`: idempotent, and an existing user past ten tasks receives it on their next completion.
+        if count >= 10 {
+            achievement(tx, "ten_tasks", &event, Some("dusk"), now)?
+        }
     } else if kind == "focus_completed" {
         if count == 1 {
             achievement(tx, "first_focus", &event, None, now)?
         }
         if count == 3 {
             achievement(tx, "three_focus", &event, Some("headphones"), now)?
+        }
+        if count >= 10 {
+            achievement(tx, "ten_focus", &event, Some("sage"), now)?
         }
     }
     let total: i64 = tx
@@ -638,6 +645,94 @@ mod tests {
         assert_eq!(progress.xp, 150);
         assert_eq!(progress.history.len(), 3);
         assert!(progress.unlocked.contains(&"headphones".to_string()));
+        drop(d);
+        std::fs::remove_file(p).unwrap();
+    }
+    #[test]
+    fn ten_tasks_unlock_dusk_without_changing_xp_and_locked_styles_cannot_be_equipped() {
+        let (d, p) = db();
+        assert!(d.equip_cosmetic("dusk", true).is_err());
+        assert!(d.equip_cosmetic("sage", true).is_err());
+        for i in 0..10 {
+            let id = format!("task-{i}");
+            d.save_task(task(&id)).unwrap();
+            d.set_task_completed(&id, true).unwrap();
+            d.set_task_completed(&id, true).unwrap(); // repeating a completion changes nothing
+        }
+        let progress = d.workspace().unwrap().progression;
+        assert_eq!(progress.xp, 250, "XP economy is unchanged: 25 per task");
+        assert_eq!(progress.history.len(), 10);
+        assert!(progress.earned.contains(&"ten_tasks".to_string()));
+        assert!(progress.unlocked.contains(&"dusk".to_string()));
+        assert!(d.equip_cosmetic("sage", true).is_err());
+        d.equip_cosmetic("dusk", true).unwrap();
+        drop(d);
+        let d = Database::open(&p).unwrap();
+        assert_eq!(d.workspace().unwrap().progression.style_id, "dusk");
+        d.equip_cosmetic("classic", true).unwrap();
+        assert_eq!(d.workspace().unwrap().progression.style_id, "classic");
+        drop(d);
+        std::fs::remove_file(p).unwrap();
+    }
+
+    #[test]
+    fn an_existing_user_past_ten_tasks_receives_dusk_once_on_their_next_completion() {
+        let (d, p) = db();
+        for i in 0..11 {
+            let id = format!("task-{i}");
+            d.save_task(task(&id)).unwrap();
+            d.set_task_completed(&id, true).unwrap();
+        }
+        // Simulate a database from before this phase: it never recorded the new achievement or its cosmetic.
+        {
+            let c = d.0.lock().unwrap();
+            c.execute(
+                "DELETE FROM earned_achievements WHERE definition_id='ten_tasks'",
+                [],
+            )
+            .unwrap();
+            c.execute("DELETE FROM cosmetic_unlocks WHERE cosmetic_id='dusk'", [])
+                .unwrap();
+        }
+        let before = d.workspace().unwrap().progression;
+        assert!(!before.unlocked.contains(&"dusk".to_string()));
+        assert!(
+            before.earned.contains(&"five_tasks".to_string()),
+            "earlier rewards remain"
+        );
+        d.save_task(task("task-next")).unwrap();
+        d.set_task_completed("task-next", true).unwrap();
+        d.set_task_completed("task-next", true).unwrap();
+        let after = d.workspace().unwrap().progression;
+        assert_eq!(after.xp, before.xp + 25);
+        assert_eq!(after.earned.iter().filter(|e| *e == "ten_tasks").count(), 1);
+        assert_eq!(after.unlocked.iter().filter(|e| *e == "dusk").count(), 1);
+        drop(d);
+        std::fs::remove_file(p).unwrap();
+    }
+
+    #[test]
+    fn ten_focus_sessions_unlock_sage() {
+        let (d, p) = db();
+        for i in 0..10 {
+            let id = format!("focus-{i}");
+            d.focus_action("start", &id, None, 1, 5, None, None)
+                .unwrap();
+            d.0.lock()
+                .unwrap()
+                .execute(
+                    "UPDATE focus_sessions SET run_started_at_ms=?2 WHERE id=?1",
+                    params![id, now_ms() - 61_000],
+                )
+                .unwrap();
+            d.focus_action("complete", &id, None, 0, 0, None, None)
+                .unwrap();
+        }
+        let progress = d.workspace().unwrap().progression;
+        assert_eq!(progress.xp, 500);
+        assert!(progress.earned.contains(&"ten_focus".to_string()));
+        d.equip_cosmetic("sage", true).unwrap();
+        assert_eq!(d.workspace().unwrap().progression.style_id, "sage");
         drop(d);
         std::fs::remove_file(p).unwrap();
     }
