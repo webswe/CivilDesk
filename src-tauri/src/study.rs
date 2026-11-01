@@ -644,7 +644,8 @@ mod tests {
         c.pragma_update(None, "foreign_keys", "ON").unwrap();
         migrate(&c).unwrap();
         // Rebuild the v6 shape of focus_sessions and drop the v7 tables.
-        c.execute_batch("DROP TABLE study_goals; DROP TABLE study_blocks; DROP TABLE focus_sessions;
+        c.execute_batch("DROP TABLE daily_priorities; DROP TABLE recurrence_occurrences; DROP TABLE recurrence_rules; DROP TABLE routine_execution_steps; DROP TABLE routine_executions; DROP TABLE routine_steps; DROP TABLE routines; DROP TABLE habit_checkins; DROP TABLE habit_schedules; DROP TABLE habits; DROP TABLE goal_entries; DROP TABLE goal_targets; DROP TABLE goals;
+            DROP TABLE study_goals; DROP TABLE study_blocks; DROP TABLE focus_sessions;
             CREATE TABLE focus_sessions (
                 id TEXT PRIMARY KEY NOT NULL, task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
                 status TEXT NOT NULL, duration_minutes INTEGER NOT NULL, break_minutes INTEGER NOT NULL,
@@ -665,7 +666,7 @@ mod tests {
         let version: i64 = c
             .pragma_query_value(None, "user_version", |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 7);
+        assert_eq!(version, 8);
         let d = Database(Mutex::new(c));
         // Pre-existing focus history is kept; it simply has no course context (it is not guessed).
         let w = d.workspace().unwrap();
