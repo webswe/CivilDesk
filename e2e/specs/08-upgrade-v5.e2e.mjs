@@ -72,4 +72,23 @@ describe('upgrade from a schema-v5 file (real application)', () => {
     await expect(button('Plan study for Upgrade exam')).toBeDisplayed();
     await expect(taskRow('Statics homework')).toBeDisplayed();
   });
+
+  it('exposes the v8 personal tables empty and accepts personal records on the upgraded file', async () => {
+    // The schema is now v8 (checked on the file after the run). The upgrade must add personal storage without touching old rows.
+    const empty = await invoke('load_personal', {});
+    expect(empty).toEqual({ goals: [], goalTargets: [], goalEntries: [], habits: [], habitSchedules: [], habitCheckins: [], routines: [], executions: [], rules: [], occurrences: [], priorities: [] });
+    const before = (await invoke('load_workspace', {})).tasks.filter(t => !t.id.startsWith('rec-'));
+    await invoke('save_goal', { goal: { id: 'up-goal', title: 'Upgrade goal', description: '', kind: 'numeric', target: 10, unit: 'reps', period: null, startDate: localDate(0), targetDate: null }, today: localDate(0) });
+    await invoke('save_recurrence', { rule: { id: 'up-rule', title: 'Upgrade chore', description: '', priority: 'normal', frequency: 'daily', weekdays: [], monthDay: null, startDate: localDate(0), endDate: null, dueTime: null, reminderOffsetMinutes: null }, today: localDate(0) });
+    await invoke('set_daily_priorities', { date: localDate(0), taskIds: ['t-personal'], today: localDate(0) });
+    await waitForPersisted('load_personal', d => d.goals.length === 1 && d.occurrences.length === 3 && d.priorities.length === 1, 'personal records on the upgraded database');
+    await restartApp();
+    const personal = await invoke('load_personal', {});
+    expect(personal.goals[0]).toMatchObject({ id: 'up-goal', status: 'active' });
+    expect(personal.occurrences).toHaveLength(3);
+    expect(personal.priorities[0]).toMatchObject({ taskId: 't-personal' });
+    const tasks = (await invoke('load_workspace', {})).tasks;
+    for (const old of before) expect(tasks.find(t => t.id === old.id)).toMatchObject({ title: old.title, category: old.category, dueDate: old.dueDate }); // nothing old was changed or reclassified
+    expect(tasks.filter(t => t.title === 'Upgrade chore')).toHaveLength(3);
+  });
 });
