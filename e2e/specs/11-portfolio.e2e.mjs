@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { $, $$, browser, expect } from '@wdio/globals';
-import { button, go, navButton, onboard, restartApp, setField, waitForPersisted, invoke } from '../lib/app.mjs';
+import { button, go, navButton, onboard, reloadView, restartApp, setField, waitForPersisted, invoke } from '../lib/app.mjs';
 
 // A genuine 1x1 PNG.
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
@@ -49,6 +49,7 @@ describe('portfolio studio (real application)', () => {
     await invoke('save_milestone', { milestone: { id: 'ms-survey', projectId, title: 'Survey complete', description: SECRET_NOTE, targetDate: '2026-09-10', completedAtMs: null, createdAtMs: now, updatedAtMs: now } });
     await invoke('save_milestone', { milestone: { id: 'ms-private', projectId, title: 'Unselected milestone', description: '', targetDate: '2026-09-20', completedAtMs: null, createdAtMs: now, updatedAtMs: now } });
     await invoke('save_journal_entry', { entry: { id: 'j1', projectId, title: SECRET_JOURNAL, entryDate: '2026-09-02', description: SECRET_JOURNAL, workCompleted: '', problems: '', solutions: '', skills: '', fileIds: [], createdAtMs: now, updatedAtMs: now } });
+    await reloadView(); // the UI loaded before the direct seeding; refresh it so the seeded project is listed
   });
   after(() => fs.rmSync(work, { recursive: true, force: true }));
 
