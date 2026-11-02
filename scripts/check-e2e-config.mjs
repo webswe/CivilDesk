@@ -5,6 +5,7 @@ import console from 'node:console';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkNotionMockIsolation } from './lib/notion-mock-guard.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = file => readFileSync(path.join(root, file), 'utf8');
@@ -55,4 +56,8 @@ if (existsSync(path.join(root, workflow))) {
   assert.ok(/--features notion-mock/.test(text), 'E2E workflow must build the Notion mock feature.');
   assert.ok(!/tauri\.release\.conf|tauri\.acceptance\.conf|upload-artifact[\s\S]{0,200}nsis/i.test(text), 'E2E workflow must not touch release or Acceptance artifacts.');
 }
+// Notion mock isolation: no production/Acceptance/CI build path may enable the mock feature or supply a mock endpoint.
+const mockProblems = checkNotionMockIsolation(root);
+assert.deepEqual(mockProblems, [], 'Notion mock isolation violated:\n' + mockProblems.join('\n'));
+console.log('Notion mock isolation checks passed.');
 console.log('E2E isolation checks passed: ' + e2e.identifier + ' / ' + e2e.mainBinaryName);
