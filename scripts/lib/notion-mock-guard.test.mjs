@@ -11,14 +11,17 @@ const dirs = [];
 function fixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cd-guard-'));
   dirs.push(dir);
-  for (const rel of ['.github', '.cargo', 'src-tauri/Cargo.toml', 'src-tauri/src', 'src-tauri/tauri.conf.json', 'src-tauri/tauri.release.conf.json', 'src-tauri/tauri.acceptance.conf.json', 'src-tauri/tauri.e2e.conf.json', 'package.json', 'scripts/tauri.mjs']) {
+  for (const rel of ['.github', 'src-tauri/Cargo.toml', 'src-tauri/src', 'src-tauri/tauri.conf.json', 'src-tauri/tauri.release.conf.json', 'src-tauri/tauri.acceptance.conf.json', 'src-tauri/tauri.e2e.conf.json', 'package.json', 'scripts/tauri.mjs']) {
     fs.cpSync(path.join(real, rel), path.join(dir, rel), { recursive: true });
   }
+  // .cargo/ is untracked developer configuration, so the fixture never copies it; it writes its own minimal file.
+  fs.mkdirSync(path.join(dir, '.cargo'));
+  fs.writeFileSync(path.join(dir, '.cargo/config.toml'), '[build]\ntarget-dir = "target"\n');
   return dir;
 }
 function edit(dir, rel, from, to) {
   const f = path.join(dir, rel);
-  const text = fs.readFileSync(f, 'utf8');
+  const text = fs.readFileSync(f, 'utf8').replace(/\r\n/g, '\n'); // Windows checkouts use CRLF; anchors are written with LF.
   if (!text.includes(from)) throw new Error('fixture anchor missing in ' + rel + ': ' + from);
   fs.writeFileSync(f, text.replace(from, to));
 }
@@ -51,6 +54,11 @@ describe('notion-mock build guard', () => {
       edit(d, file, from, to);
       expect(checkNotionMockIsolation(d), file + ' -> ' + to).not.toEqual([]);
     }
+  });
+  it('rejects forbidden rustflags in a fixture-created .cargo/config.toml, for that reason', () => {
+    const d = fixture();
+    edit(d, '.cargo/config.toml', '[build]', '[build]\nrustflags = ["--cfg", "feature=\\"x\\""]');
+    expect(checkNotionMockIsolation(d)).toEqual(['.cargo/config.toml: passes cfg/rustflags to the compiler.']);
   });
   it('fails when the feature becomes a default Cargo feature', () => {
     const d = fixture();
