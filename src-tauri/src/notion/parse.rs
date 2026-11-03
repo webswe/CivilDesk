@@ -576,7 +576,22 @@ pub struct PageView {
     pub created: Option<String>,
     pub last_edited: Option<String>,
     pub parent_kind: String,
+    /// Authoritative parent identifier when Notion provides one (page, database, data source or block). Never inferred.
+    pub parent_id: Option<String>,
+    pub icon: Option<String>,
     pub properties: Vec<Cell>,
+}
+
+/// The identifier named by the parent's own `type` (for example `page_id`). Anything else is not a parent we can follow.
+fn parent_identifier(parent: &Value) -> Option<String> {
+    let kind = s(parent, "type")?;
+    if !matches!(
+        kind,
+        "page_id" | "database_id" | "data_source_id" | "block_id"
+    ) {
+        return None;
+    }
+    s(parent, kind).and_then(|id| normalize_id(id).ok())
 }
 
 pub fn parse_page(v: &Value) -> Result<PageView, NotionError> {
@@ -596,6 +611,8 @@ pub fn parse_page(v: &Value) -> Result<PageView, NotionError> {
             .and_then(|p| s(p, "type"))
             .map(|t| clean(t, 40, false))
             .unwrap_or_else(|| "unknown".into()),
+        parent_id: v.get("parent").and_then(parent_identifier),
+        icon: emoji_icon(v),
         properties: cells_for(v),
     })
 }
@@ -612,6 +629,8 @@ pub struct BlockView {
     pub language: Option<String>,
     pub has_children: bool,
     pub supported: bool,
+    /// https links found in the block's text. Shown as inert text until the user chooses to open one.
+    pub links: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -669,6 +688,21 @@ pub fn parse_block(b: &Value) -> Option<BlockView> {
             format!("Unsupported block ({})", clean(&kind, 40, false))
         }
     };
+    let mut links: Vec<String> = Vec::new();
+    for key in ["rich_text", "caption"] {
+        for run in body
+            .get(key)
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if let Some(h) = s(run, "href").filter(|h| is_safe_https(h)) {
+                if !links.iter().any(|l| l == h) && links.len() < 5 {
+                    links.push(h.to_string());
+                }
+            }
+        }
+    }
     Some(BlockView {
         id,
         kind,
@@ -680,7 +714,27 @@ pub fn parse_block(b: &Value) -> Option<BlockView> {
             .and_then(Value::as_bool)
             .unwrap_or(false),
         supported,
+        links,
     })
+}
+
+/// A link CivilDesk may hand to the system browser: https only, no credentials, no whitespace or control characters.
+pub fn is_safe_https(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
+    let host_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let host = &rest[..host_end];
+    url.len() <= 2000
+        && !host.is_empty()
+        && !host.contains('@')
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == ':')
+        && url.chars().all(|c| {
+            c.is_ascii_graphic()
+                && !matches!(c, '"' | '<' | '>' | '\\' | '^' | '`' | '{' | '}' | '|')
+        })
 }
 
 pub fn parse_blocks(v: &Value) -> Result<BlocksPage, NotionError> {
@@ -945,5 +999,34 @@ mod tests {
         let long = "x".repeat(5000);
         let v = json!({"object":"page","id":A,"properties":{"Name":{"type":"title","title":[{"plain_text":long}]}}});
         assert!(parse_page(&v).unwrap().title.chars().count() <= NAME_MAX + 1);
+    }
+
+    #[test]
+    fn page_parent_follows_only_the_declared_identifier() {
+        let v = json!({"object":"page","id":A,"parent":{"type":"page_id","page_id":B},"icon":{"type":"emoji","emoji":"📘"},"properties":{}});
+        let p = parse_page(&v).unwrap();
+        assert_eq!(p.parent_id.as_deref(), Some(B));
+        assert_eq!(p.icon.as_deref(), Some("📘"));
+        let ws = parse_page(&json!({"object":"page","id":A,"parent":{"type":"workspace","workspace":true},"properties":{}})).unwrap();
+        assert_eq!(ws.parent_id, None);
+        let bad = parse_page(&json!({"object":"page","id":A,"parent":{"type":"page_id","page_id":"nope"},"properties":{}})).unwrap();
+        assert_eq!(bad.parent_id, None);
+    }
+
+    #[test]
+    fn block_links_are_https_only_and_bounded() {
+        let b = json!({"object":"block","id":A,"type":"paragraph","has_children":false,"paragraph":{"rich_text":[
+            {"plain_text":"a","href":"https://example.com/x?y=1"},
+            {"plain_text":"b","href":"javascript:alert(1)"},
+            {"plain_text":"c","href":"http://example.com"},
+            {"plain_text":"d","href":"https://user@example.com"},
+            {"plain_text":"e","href":"https://example.com/x?y=1"}]}});
+        assert_eq!(
+            parse_block(&b).unwrap().links,
+            vec!["https://example.com/x?y=1".to_string()]
+        );
+        assert!(!is_safe_https("https://exa mple.com"));
+        assert!(!is_safe_https("https://"));
+        assert!(!is_safe_https("https://example.com/\"a"));
     }
 }

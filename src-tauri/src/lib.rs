@@ -703,6 +703,36 @@ async fn notion_page_blocks(
 ) -> Result<notion::parse::BlocksPage, notion::client::NotionError> {
     notion_run(app, move |db, n| n.page_blocks(db, id, cursor)).await
 }
+/// Hands a validated https URL to the system browser. No shell is involved and no Notion credential is sent.
+fn open_in_system_browser(url: &str) -> Result<(), notion::client::NotionError> {
+    if !notion::parse::is_safe_https(url) {
+        return Err(notion::client::NotionError::invalid(
+            "That link can't be opened from CivilDesk.",
+        ));
+    }
+    #[cfg(windows)]
+    let spawned = std::process::Command::new("rundll32.exe")
+        .args(["url.dll,FileProtocolHandler", url])
+        .spawn();
+    #[cfg(target_os = "macos")]
+    let spawned = std::process::Command::new("open").arg(url).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let spawned = std::process::Command::new("xdg-open").arg(url).spawn();
+    spawned
+        .map(|_| ())
+        .map_err(|_| notion::client::NotionError::invalid("Your browser couldn't be opened."))
+}
+/// Opens a Notion item by identifier. The URL is built here from a validated identifier, never taken from the frontend.
+#[tauri::command]
+fn notion_open_in_notion(id: String) -> Result<(), notion::client::NotionError> {
+    let id = notion::client::normalize_id(&id)?;
+    open_in_system_browser(&format!("https://www.notion.so/{}", id.replace('-', "")))
+}
+/// Opens a link that appeared in Notion text, only after the user chose it. https only.
+#[tauri::command]
+fn notion_open_link(url: String) -> Result<(), notion::client::NotionError> {
+    open_in_system_browser(&url)
+}
 #[tauri::command]
 async fn notion_set_source_selected(
     app: tauri::AppHandle,
@@ -837,6 +867,8 @@ pub fn run() {
             notion_preview_entries,
             notion_open_page,
             notion_page_blocks,
+            notion_open_in_notion,
+            notion_open_link,
             notion_set_source_selected,
             notion_selected_sources
         ])
