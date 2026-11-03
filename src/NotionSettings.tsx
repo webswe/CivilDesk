@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Modal } from './components/Modal';
-import { NotionBrowser } from './NotionBrowser';
 import { NotionError, notionCheck, notionConnect, notionDisconnect, notionSelectedSources, notionSetSourceSelected, notionStatus, type ConnectionStatus, type SelectedSource } from './services/notion';
 import './notion.css';
 
@@ -29,7 +27,7 @@ function liveFrom(e: NotionError): Live {
 }
 const when = (ms: number | null) => ms ? new Date(ms).toLocaleString() : 'Never';
 
-export function NotionSettings() {
+export function NotionSettings({ onOpenWorkspace }: { onOpenWorkspace?: () => void } = {}) {
   const [status, setStatus] = useState<ConnectionStatus | null>(null);
   const [sources, setSources] = useState<SelectedSource[]>([]);
   const [live, setLive] = useState<Live>(null);
@@ -37,7 +35,6 @@ export function NotionSettings() {
   const [token, setToken] = useState('');
   const [replacing, setReplacing] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const [browsing, setBrowsing] = useState(false);
   const [busy, setBusy] = useState(false);
 
   // Local state only: opening Settings never contacts Notion.
@@ -74,15 +71,13 @@ export function NotionSettings() {
   };
   const disconnect = async () => {
     setBusy(true); setProblem(null);
-    try { setStatus(await notionDisconnect()); setSources([]); setConfirming(false); setBrowsing(false); setLive(null); setReplacing(false); setToken(''); }
+    try { setStatus(await notionDisconnect()); setSources([]); setConfirming(false); setLive(null); setReplacing(false); setToken(''); }
     catch (err) { setProblem(err instanceof Error ? err.message : 'Notion could not be disconnected.'); }
     finally { setBusy(false); }
   };
   const forget = async (s: SelectedSource) => {
     try { setSources(await notionSetSourceSelected(s.resourceId, s.resourceType, false)); setStatus(await notionStatus()); } catch (err) { setProblem(err instanceof Error ? err.message : 'That source could not be removed.'); }
   };
-  const afterSources = (next: SelectedSource[]) => { setSources(next); void notionStatus().then(setStatus, () => undefined); };
-  const onBrowseError = (e: NotionError) => { setLive(liveFrom(e)); void refreshLocal(); if (e.kind === 'not_connected') setBrowsing(false); };
   const badge = stateLabel(status, live);
 
   return <section className="setting-group notion-panel" aria-labelledby="notion-heading">
@@ -104,7 +99,7 @@ export function NotionSettings() {
 
     {hasCredential && <div className="notion-actions">
       <button className="soft-button" onClick={() => void check()} disabled={busy}>Check connection</button>
-      <button className="primary-button" onClick={() => setBrowsing(true)} disabled={busy || !connected}>Browse content</button>
+      <button className="primary-button" onClick={onOpenWorkspace} disabled={busy || !connected || !onOpenWorkspace}>Open workspace</button>
       <button className="soft-button" onClick={() => setReplacing(r => !r)} aria-expanded={replacing}>Replace token</button>
       <button className="soft-button danger-link" onClick={() => setConfirming(true)} disabled={busy}>Disconnect</button>
     </div>}
@@ -130,12 +125,8 @@ export function NotionSettings() {
     {connected && <div className="notion-sources">
       <h3>Remembered sources</h3>
       {sources.length ? <ul className="simple-list">{sources.map(s => <li key={s.resourceId}><span>{s.displayName}<small>{s.resourceType === 'page' ? 'Page' : 'Data source'} {'·'} verified {when(s.lastVerifiedAtMs)}</small></span><button className="soft-button" onClick={() => void forget(s)} aria-label={'Stop remembering ' + s.displayName}>Remove</button></li>)}</ul>
-        : <p className="notion-note">No sources remembered yet. Use Browse content and choose {'“'}Remember this source{'”'}.</p>}
+        : <p className="notion-note">No sources remembered yet. Open the workspace and choose {'“'}Remember source{'”'} on a page or database.</p>}
     </div>}
 
-    <Modal open={browsing} title="Notion content" onClose={() => setBrowsing(false)}>
-      <div className="notion-dialog-head"><h2>Notion content</h2><button className="soft-button" onClick={() => setBrowsing(false)}>Close</button></div>
-      <NotionBrowser sources={sources} onSources={afterSources} onError={onBrowseError}/>
-    </Modal>
   </section>;
 }

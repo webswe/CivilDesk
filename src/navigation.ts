@@ -27,8 +27,8 @@ export const utilityNav: NavItem[] = [
   { id: 'About and Updates', label: 'About', icon: CircleHelp },
 ];
 /** Pages without a nav item of their own, mapped to the item that should look active. */
-const parents: Record<string, string> = { Tasks: 'Dashboard', 'Engineering Tasks': 'Projects', Customization: 'Pip', Achievements: 'Pip' };
-export const pageTitles: Record<string, string> = { Tasks: 'All tasks', 'Engineering Tasks': 'Engineering tasks', Customization: 'Wardrobe', Achievements: 'Achievements' };
+const parents: Record<string, string> = { Tasks: 'Dashboard', 'Engineering Tasks': 'Projects', Customization: 'Pip', Achievements: 'Pip', Notion: 'Settings' };
+export const pageTitles: Record<string, string> = { Tasks: 'All tasks', 'Engineering Tasks': 'Engineering tasks', Customization: 'Wardrobe', Achievements: 'Achievements', Notion: 'Notion workspace' };
 
 export function allItems(): NavItem[] { return [...mainNav.flatMap(e => isGroup(e) ? e.items : [e]), ...utilityNav]; }
 export function pageLabel(id: string): string { return pageTitles[id] ?? allItems().find(i => i.id === id)?.label ?? id; }
