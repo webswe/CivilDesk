@@ -11,6 +11,8 @@ beforeAll(async () => { mock = createNotionMock({ port: 0 }); base = 'http://127
 afterAll(() => mock.stop());
 const call = (method, p, { body, token = TOKEN, version = API_VERSION } = {}) => fetch(base + p, { method, headers: { ...(token ? { authorization: 'Bearer ' + token } : {}), 'notion-version': version, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
 
+const id0 = () => '99999999-0000-4000-8000-000000000000';
+
 describe('notion mock (E2E support)', () => {
   it('has no outbound networking, so it cannot forward to a live workspace', () => {
     const source = fs.readFileSync(path.join(here, 'notion-mock.mjs'), 'utf8');
@@ -41,6 +43,20 @@ describe('notion mock (E2E support)', () => {
     expect(second.has_more).toBe(false); expect(first.results.length + second.results.length).toBe(28);
     const q = await (await call('POST', `/v1/data_sources/${IDS.dataSource}/query`, { body: { page_size: 10 } })).json();
     expect(q.results).toHaveLength(2);
+  });
+
+  it('serves sub-pages, database rows, nested blocks and links for the workspace specs, read-only', async () => {
+    const sub = await (await call('GET', `/v1/pages/${IDS.child}`)).json();
+    expect(sub.parent).toEqual({ type: 'page_id', page_id: IDS.notes });
+    const row = await (await call('GET', `/v1/pages/${IDS.entry1}`)).json();
+    expect(row.parent.type).toBe('data_source_id');
+    const notes = await (await call('GET', `/v1/blocks/${IDS.notes}/children`)).json();
+    expect(notes.results.some(b => b.type === 'child_page' && b.id === IDS.child)).toBe(true);
+    expect(notes.results.find(b => b.id === IDS.nestedBlock).has_children).toBe(true);
+    expect(JSON.stringify(notes.results)).toContain('https://example.com/e2e-link');
+    const nested = await (await call('GET', `/v1/blocks/${IDS.nestedBlock}/children`)).json();
+    expect(nested.results).toHaveLength(1);
+    expect((await call('GET', `/v1/pages/${id0()}`)).status).toBe(404);
   });
 
   it('never records the credential', async () => {

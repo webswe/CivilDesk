@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { $, $$, browser, expect } from '@wdio/globals';
-import { addTask, button, DIALOG, go, onboard, restartApp, taskRow } from '../lib/app.mjs';
+import { addTask, button, go, onboard, restartApp, taskRow } from '../lib/app.mjs';
 import { e2eDataPaths } from '../lib/guard.mjs';
 import { deleteE2eCredential, e2eCredentialExists } from '../lib/credentials.mjs';
 import { createNotionMock, FAKE_TOKEN_PREFIX, IDS } from '../lib/notion-mock.mjs';
@@ -14,7 +14,14 @@ const TOKEN = FAKE_TOKEN_PREFIX + 'DoNotUseElsewhere_0123456789';
 const mock = createNotionMock();
 const settings = () => $('//button[@title="Settings"]');
 const stateText = () => $('//*[contains(@class,"notion-state")]');
-const item = name => $(`${DIALOG}//button[contains(@class,"notion-item")][.//strong[contains(normalize-space(.),"${name}")]]`);
+const SIDEBAR = '//aside[@aria-label="Notion navigation"]';
+const MAIN = '//main[@aria-label="Notion content"]';
+const item = name => $(`${SIDEBAR}//button[contains(@class,"nw-nav-item")][.//span[contains(@class,"nw-nav-name")][normalize-space(.)="${name}"]]`);
+const heading = name => $(`${MAIN}//h1[normalize-space(.)="${name}"]`);
+const toolbar = label => $(`//*[@role="toolbar"]//button[@aria-label="${label}"]`);
+const crumb = name => $(`${MAIN}//nav[@aria-label="Notion breadcrumb"]//button[contains(normalize-space(.),"${name}")]`);
+const searchRequests = () => mock.state.requests.filter(r => r.path === '/v1/search').length;
+const noOverflow = () => browser.execute(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
 const panel = () => $('//section[contains(@class,"notion-panel")]');
 const waitState = label => browser.waitUntil(async () => (await stateText().getText()) === label, { timeout: 20000, timeoutMsg: `Notion status never became "${label}"` });
 const openSettings = async () => { await settings().click(); await panel().waitForDisplayed(); };
@@ -78,62 +85,102 @@ describe('notion foundation (real application, mocked Notion)', () => {
     expect(await browser.execute(token => document.documentElement.outerHTML.includes(token) || JSON.stringify({ ...localStorage }).includes(token), TOKEN)).toBe(false);
   });
 
-  it('discovers accessible pages and data sources, with pagination and no duplicates', async () => {
-    await button('Browse content').click();
+  it('opens a workspace page inside CivilDesk (no dialog) and discovers pages and databases with pagination and no duplicates', async () => {
+    await button('Open workspace').click();
+    await $(SIDEBAR).waitForDisplayed();
+    expect(await $$('//*[@role="dialog"]')).toHaveLength(0);
     await item('E2E Assignments').waitForDisplayed();
     await expect(item('E2E Notes')).toBeDisplayed();
-    expect(await item('E2E Assignments').getText()).toContain('Data source');
-    expect(await item('E2E Notes').getText()).toContain('Page');
-    await $(`${DIALOG}//button[normalize-space(.)="Load more"]`).click();
+    await shot('03a-workspace-landing');
+    expect(await $(`${SIDEBAR}//ul[@aria-label="Shared databases"]`).getText()).toContain('E2E Assignments');
+    expect(await $(`${SIDEBAR}//ul[@aria-label="Shared pages"]`).getText()).toContain('E2E Notes');
+    await $(`${SIDEBAR}//button[normalize-space(.)="Load more"]`).click();
     await item('E2E Filler 25').waitForDisplayed();
     const names = [];
-    for (const el of await $$(`${DIALOG}//button[contains(@class,"notion-item")]//strong`)) names.push(await el.getText());
+    for (const el of await $$(`${SIDEBAR}//ul[@aria-label="Shared pages" or @aria-label="Shared databases"]//span[contains(@class,"nw-nav-name")]`)) names.push(await el.getText());
     expect(new Set(names).size).toBe(names.length);
     expect(names.length).toBe(28);
-    await shot('03-browse');
+    await shot('03b-all-shared-loaded');
   });
 
-  it('shows data-source schema and a read-only entry preview, and remembers a source', async () => {
+  it('shows a database as a readable table, with a Properties control instead of a schema dump, and remembers it', async () => {
     await item('E2E Assignments').click();
-    await $(`${DIALOG}//h2[normalize-space(.)="E2E Assignments"]`).waitForDisplayed();
-    const table = $(`${DIALOG}//table`);
+    await heading('E2E Assignments').waitForDisplayed();
+    const table = $(`${MAIN}//table`);
     await table.waitForDisplayed();
     const text = await table.getText();
     expect(text).toContain('E2E Entry One');
     expect(text).toContain('Done');
-    expect(text).toContain('Unsupported property type (rollup)');
-    await shot('04-data-source');
-    await $(`${DIALOG}//button[normalize-space(.)="View its database"]`).click();
-    await $(`${DIALOG}//h2[normalize-space(.)="E2E Coursework"]`).waitForDisplayed();
-    await expect(item('E2E Archive')).toBeDisplayed();
-    await $(`${DIALOG}//button[normalize-space(.)="Back"]`).click();
-    await $(`${DIALOG}//button[normalize-space(.)="Remember this source"]`).click();
-    await $(`${DIALOG}//button[contains(normalize-space(.),"Remembered")]`).waitForDisplayed();
+    expect(text).toContain('Apr 1, 2026');
+    expect(text).not.toContain('2026-04-01');
+    expect(text).toContain('Not supported');
+    expect(await $(`${MAIN}//details[contains(@class,"nw-details")]`).getAttribute('open')).toBeNull();
+    await shot('04-data-source-table');
+    await $(`${MAIN}//button[normalize-space(.)="Remember source"]`).click();
+    await $(`${MAIN}//button[contains(normalize-space(.),"Remembered")]`).waitForDisplayed();
     const sources = (await rawInvoke('notion_selected_sources')).value;
     expect(sources).toHaveLength(1);
     expect(sources[0]).toMatchObject({ resourceId: IDS.dataSource, resourceType: 'data_source', displayName: 'E2E Assignments' });
+    await $(`${SIDEBAR}//ul[@aria-label="Saved sources"]//span[normalize-space(.)="E2E Assignments"]`).waitForDisplayed();
+    await crumb('E2E Coursework').click();
+    await heading('E2E Coursework').waitForDisplayed();
+    await expect($(`${MAIN}//button[contains(normalize-space(.),"E2E Archive")]`)).toBeDisplayed();
+    await toolbar('Back').click();
+    await $(`${MAIN}//table`).waitForDisplayed();
   });
 
-  it('shows page content as inert text, never as HTML', async () => {
-    await $(`${DIALOG}//button[normalize-space(.)="Back"]`).click();
+  it('opens a database row as a page, with breadcrumbs, and returns to the table without searching again', async () => {
+    const searches = searchRequests();
+    await $(`${MAIN}//button[normalize-space(.)="E2E Entry One"]`).click();
+    await heading('E2E Entry One').waitForDisplayed();
+    const props = await $(`${MAIN}//dl[contains(@class,"nw-props")]`).getText();
+    expect(props).toContain('Status'); expect(props).toContain('Apr 1, 2026');
+    await $(`${MAIN}//*[contains(@class,"nw-blocks")]//*[contains(.,"E2E entry body")]`).waitForDisplayed();
+    await expect(crumb('E2E Assignments')).toBeDisplayed();
+    await shot('06-database-entry');
+    await toolbar('Back').click();
+    await $(`${MAIN}//table`).waitForDisplayed();
+    expect(searchRequests()).toBe(searches);
+  });
+
+  it('renders a page as a document with nested content, sub-pages, breadcrumbs and honest unsupported blocks', async () => {
     await item('E2E Notes').click();
-    await $(`${DIALOG}//*[contains(@class,"notion-blocks")]`).waitForDisplayed();
-    const text = await $(`${DIALOG}//*[contains(@class,"notion-blocks")]`).getText();
-    expect(text).toContain('E2E Heading');
+    await heading('E2E Notes').waitForDisplayed();
+    await $(`${MAIN}//h2[normalize-space(.)="E2E Heading"]`).waitForDisplayed();
+    const text = await $(`${MAIN}//*[contains(@class,"nw-blocks")]`).getText();
     expect(text).toContain('Attachment not downloaded: Site photo');
-    expect(text).toContain('Unsupported block (table)');
+    expect(text).toContain('can\u2019t be shown in CivilDesk (table)');
+    expect(text).toContain('1.'); expect(text).toContain('E2E first step');
     expect(text).not.toContain('SECRET');
-    await shot('05-page-preview');
-    await $(`${DIALOG}//button[normalize-space(.)="Back"]`).click();
-    await $(`${DIALOG}//input[@type="search"]`).setValue('Hostile');
-    await $(`${DIALOG}//button[normalize-space(.)="Search"]`).click();
-    await item('Hostile').waitForDisplayed();
-    await item('Hostile').click();
-    await $(`${DIALOG}//*[contains(@class,"notion-blocks")]`).waitForDisplayed();
-    expect(await $(`${DIALOG}//*[contains(@class,"notion-blocks")]`).getText()).toContain('<img src=x');
-    expect(await $$(`${DIALOG}//img | ${DIALOG}//script | ${DIALOG}//iframe | ${DIALOG}//a`)).toHaveLength(0);
+    await expect($(`${MAIN}//button[@aria-label="Open link example.com"]`)).toBeDisplayed();
+    expect(await $$(`${MAIN}//img | ${MAIN}//iframe | ${MAIN}//a | ${MAIN}//script`)).toHaveLength(0);
+    await shot('05-page-document');
+    await $(`${MAIN}//button[contains(@aria-label,"Show nested content of E2E nested bullet")]`).click();
+    await $(`${MAIN}//*[contains(.,"E2E nested detail")]`).waitForDisplayed();
+    await shot('07-nested-content');
+    await $(`${MAIN}//button[contains(@class,"nw-card")][contains(normalize-space(.),"E2E Sub page")]`).click();
+    await heading('E2E Sub page').waitForDisplayed();
+    await crumb('E2E Notes').click();
+    await heading('E2E Notes').waitForDisplayed();
+    // The same page also appears under Recent, so expansion is checked in the shared list, where the tree really comes from the page's child blocks.
+    const shared = `${SIDEBAR}//ul[@aria-label="Shared pages"]`;
+    await $(`${shared}//button[@aria-label="Expand E2E Notes"]`).click();
+    const subPage = $(`${shared}//ul[@aria-label="Inside E2E Notes"]//button[contains(@class,"nw-nav-item")][.//span[normalize-space(.)="E2E Sub page"]]`);
+    await subPage.waitForDisplayed();
+    await subPage.scrollIntoView({ block: 'center' });
+    await shot('05b-expanded-navigation');
+  });
+
+  it('searches from the sidebar and shows hostile page content as inert text, never as HTML', async () => {
+    await $(`${SIDEBAR}//input[@type="search"]`).setValue('Hostile');
+    await browser.keys('Enter');
+    await $(`${SIDEBAR}//section[@aria-label="Search results"]`).waitForDisplayed();
+    await $(`${SIDEBAR}//section[@aria-label="Search results"]//button[contains(@class,"nw-nav-item")]`).click();
+    await $(`${MAIN}//*[contains(@class,"nw-blocks")]//p[contains(.,"<img src=x")]`).waitForDisplayed();
+    expect(await $$(`${MAIN}//img | ${MAIN}//script | ${MAIN}//iframe | ${MAIN}//a`)).toHaveLength(0);
     expect(await browser.execute(() => typeof window.__e2ePwned)).toBe('undefined');
-    await $(`${DIALOG}//button[normalize-space(.)="Close"]`).click();
+    await shot('08-search');
+    await $(`${SIDEBAR}//section[@aria-label="Search results"]//button[normalize-space(.)="Clear"]`).click();
   });
 
   it('keeps the connection and the remembered source after the app restarts, without contacting Notion', async () => {
@@ -147,33 +194,42 @@ describe('notion foundation (real application, mocked Notion)', () => {
     expect(e2eCredentialExists()).toBe(true);
   });
 
-  it('stays usable at narrower window widths (evidence capture only when requested)', async function () {
-    if (!evidenceDir) return this.skip();
+  it('keeps the saved source on the workspace landing screen after a restart', async () => {
+    await $('//button[@title="Settings"]').click();
+    await button('Open workspace').click();
+    await $(`${MAIN}//section[@aria-label="Notion workspace"]//button[normalize-space(.)="E2E Assignments"]`).waitForDisplayed();
+  });
+
+  it('keeps the table inside the window and navigation reachable at narrow widths', async () => {
     for (const width of [1600, 1280, 900, 760, 700]) {
       await browser.setWindowSize(width, 900);
-      await panel().scrollIntoView();
-      await shot(`07-settings-${width}`);
+      await $(MAIN).waitForDisplayed();
+      if (evidenceDir) await shot(`09-workspace-${width}`);
     }
-    await button('Browse content').click();
-    await item('E2E Assignments').waitForDisplayed();
-    await shot('08-browse-700');
+    // 700px: the sidebar is a drawer, the table scrolls in its own container and the page never scrolls sideways.
+    expect(await $$(SIDEBAR)).toHaveLength(0);
+    await $('//button[@aria-label="Show navigation"]').click();
+    await $(SIDEBAR).waitForDisplayed();
+    await shot('10-narrow-drawer');
     await item('E2E Assignments').click();
-    await $(`${DIALOG}//table`).waitForDisplayed();
-    await shot('09-data-source-700');
-    await $(`${DIALOG}//button[normalize-space(.)="Close"]`).click();
+    await $(`${MAIN}//table`).waitForDisplayed();
+    expect(await $$(SIDEBAR)).toHaveLength(0);
+    expect(await noOverflow()).toBe(true);
+    await shot('11-narrow-table');
     await browser.setWindowSize(1280, 820);
+    await openSettings(); // the following specs continue from the Settings page
   });
   it('shows rate-limited, authentication-failed and recovered states from a user-initiated check', async () => {
     mock.state.mode = 'ratelimit';
     await button('Check connection').click();
     await waitState('Rate limited');
     expect(await $('//section[contains(@class,"notion-panel")]//*[@role="alert"]').getText()).toContain('limiting requests');
-    await expect(button('Browse content')).toBeEnabled();
+    await expect(button('Open workspace')).toBeEnabled();
 
     mock.state.mode = 'unauthorized';
     await button('Check connection').click();
     await waitState('Authentication failed');
-    await expect(button('Browse content')).toBeDisabled();
+    await expect(button('Open workspace')).toBeDisabled();
     expect((await rawInvoke('notion_status')).value.state).toBe('auth_failed');
     const search = await rawInvoke('notion_search', { query: null, kind: null, cursor: null });
     expect(search.ok).toBe(false);
@@ -186,7 +242,7 @@ describe('notion foundation (real application, mocked Notion)', () => {
     mock.state.mode = 'ok';
     await button('Check connection').click();
     await waitState('Connected');
-    await expect(button('Browse content')).toBeEnabled();
+    await expect(button('Open workspace')).toBeEnabled();
   });
 
   it('reports offline calmly while every other CivilDesk feature keeps working', async () => {
