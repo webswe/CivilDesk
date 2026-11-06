@@ -97,7 +97,9 @@ describe('personal productivity (real application)', () => {
     await waitForPersisted('load_personal', d => d.executions.length === 1 && d.executions[0].steps.filter(s => s.doneAtMs).length === 1, 'the first checked step (partial progress)');
     expect((await invoke('load_personal', {})).executions[0].completedAtMs).toBeNull();
     await $(`${list}//label[normalize-space(.)="Check calendar"]//input`).click();
-    await button('Finish routine').click();
+    const finish = button('Finish routine');
+    await finish.waitForEnabled();
+    await finish.click();
     await waitForPersisted('load_personal', d => d.executions[0]?.completedAtMs, 'the completed routine run');
     const run = (await invoke('load_personal', {})).executions[0];
     await invoke('complete_routine', { executionId: run.id }); // a second completion changes nothing
