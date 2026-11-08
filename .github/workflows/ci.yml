@@ -39,10 +39,9 @@ jobs:
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
       - run: npm run tauri build -- --bundles nsis
-      - name: Upload Windows installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: CivilDesk-Windows-NSIS
-          path: src-tauri/target/release/bundle/nsis/*.exe
-          if-no-files-found: error
-          retention-days: 14
+      - name: Verify Windows installer was built
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem 'src-tauri/target/release/bundle/nsis/*.exe' -File)
+          if ($installers.Count -ne 1) { throw "Expected one NSIS installer; found $($installers.Count)." }
+          Get-FileHash -LiteralPath $installers[0].FullName -Algorithm SHA256 | Format-List

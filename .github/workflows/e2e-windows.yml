@@ -10,6 +10,10 @@ on:
         type: choice
         default: smoke
         options: [smoke, full]
+      upload_diagnostics:
+        description: 'Upload results bundle (requires available GitHub artifact storage)'
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -84,6 +88,22 @@ jobs:
         working-directory: e2e
         run: |
           if ('${{ inputs.suite }}' -eq 'full') { npm test } else { npm run test:smoke }
+      - name: Summarize native test results
+        if: always()
+        shell: pwsh
+        run: |
+          $reports = @(Get-ChildItem 'e2e/results/junit-results*.xml' -File -ErrorAction SilentlyContinue)
+          $total = 0; $failed = 0; $skipped = 0
+          foreach ($report in $reports) {
+            [xml]$junit = Get-Content -LiteralPath $report.FullName -Raw
+            $total += [int]$junit.testsuites.tests
+            $failed += [int]$junit.testsuites.failures + [int]$junit.testsuites.errors
+            $skipped += [int]$junit.testsuites.skipped
+          }
+          $passed = $total - $failed - $skipped
+          "Native E2E: $($reports.Count) specifications, $total tests, $passed passed, $failed failed, $skipped skipped"
+          if (-not $reports.Count) { Write-Warning 'No JUnit reports; the SQLite and results gate will fail.' }
+          "Runner diagnostics: e2e/results (JUnit, screenshots, logs, SQLite checks)"
       - name: Verify SQLite health and results
         if: always()
         working-directory: e2e
@@ -99,11 +119,27 @@ jobs:
           [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
           New-Item -ItemType Directory -Force e2e/results | Out-Null
           $bmp.Save('e2e/results/desktop-on-failure.png')
+      - name: Print native failure diagnostics
+        if: failure()
+        shell: pwsh
+        run: |
+          Get-ChildItem 'e2e/results' -Recurse -File -ErrorAction SilentlyContinue | Select-Object FullName, Length | Format-Table -AutoSize
+          foreach ($log in @('e2e/results/tauri-driver.log', 'e2e/results/wdio-logs/wdio.log')) {
+            if (Test-Path -LiteralPath $log) {
+              "Last 100 lines of $log"
+              Get-Content -LiteralPath $log -Tail 100
+            }
+          }
       - name: Upload results (screenshots, logs, JUnit)
-        if: always()
+        if: ${{ always() && inputs.upload_diagnostics }}
         uses: actions/upload-artifact@v4
         with:
           name: civildesk-e2e-results
           path: e2e/results
           if-no-files-found: warn
           retention-days: 14
+      - name: Report intentionally skipped artifact upload
+        if: ${{ always() && !inputs.upload_diagnostics }}
+        shell: pwsh
+        run: |
+          'Diagnostic artifact upload intentionally skipped; results remained on this runner during the job.' | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
