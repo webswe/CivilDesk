@@ -43,7 +43,16 @@ const cargo = read('src-tauri/Cargo.toml');
 assert.ok(!/wdio|webdriver|tauri-plugin-(?!dialog)/i.test(cargo), 'Cargo.toml must not depend on test plugins.');
 assert.deepEqual(json('src-tauri/capabilities/default.json').permissions, ['core:default', 'dialog:allow-open']);
 const rustFiles = readdirSync(path.join(root, 'src-tauri/src')).filter(f => f.endsWith('.rs'));
-for (const f of rustFiles) assert.ok(!/E2E|webdriver|wdio/i.test(read('src-tauri/src/' + f)), f + ' contains test-only code.');
+for (const f of rustFiles) if (f !== 'brightspace.rs') assert.ok(!/E2E|webdriver|wdio/i.test(read('src-tauri/src/' + f)), f + ' contains test-only code.');
+const brightspace = read('src-tauri/src/brightspace.rs');
+const synthetic = read('src-tauri/src/bin/brightspace-synthetic.rs');
+assert.ok(brightspace.includes('cfg!(feature = "notion-mock")') && brightspace.includes('com.webswe.civildesk.e2e') && brightspace.includes('civildesk-e2e-synthetic'));
+assert.ok(brightspace.includes('brightspace-synthetic.exe') && brightspace.includes('SYNTHETIC_ORIGIN'));
+assert.ok(brightspace.includes('.join("com.webswe.civildesk.e2e")') && brightspace.includes('brightspace-scenario.txt'), 'Synthetic scenario must be inside E2E application data.');
+assert.ok(brightspace.includes('.env_clear()') && brightspace.includes('.env("D2L_CLI_PROFILE", self.profile)') && brightspace.includes('.env("D2L_CLI_BASE_URL", origin)'), 'Child environment must override inherited profile and portal.');
+assert.ok(!/KeyringCredentialStore|CredentialManagerStore|auth login|courses list/.test(brightspace + synthetic), 'Brightspace adapter and fixture must not access credentials or academic records directly.');
+assert.ok(synthetic.includes('civildesk-e2e-synthetic') && synthetic.includes('synthetic.example.test'));
+assert.ok(read('.github/workflows/e2e-windows.yml').includes('--bin brightspace-synthetic'));
 const srcFiles = readdirSync(path.join(root, 'src'), { recursive: true }).filter(f => /\.(ts|tsx)$/.test(f) && !/\.test\./.test(f));
 for (const f of srcFiles) assert.ok(!/civildesk\.e2e|webdriver|wdio/i.test(read('src/' + f)), f + ' contains test-only code.');
 

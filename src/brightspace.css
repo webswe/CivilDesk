@@ -1,0 +1,17 @@
+.brightspace-panel { max-width: 800px; }
+.brightspace-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.brightspace-badge { color: #f4d5db; background: #594353; border: 1px solid #775866; border-radius: 999px; padding: 6px 10px; font-size: 11px; }
+.brightspace-panel p, .brightspace-panel small { color: #d5bfc8; font-size: 12px; line-height: 1.5; }
+.brightspace-panel form { display: grid; gap: 8px; margin-top: 15px; }
+.brightspace-panel label { color: #f1e4e9; font-size: 12px; font-weight: 650; margin-top: 10px; }
+.brightspace-panel input { max-width: 100%; }
+.brightspace-panel small { display: block; margin-bottom: 4px; }
+.brightspace-actions { display: flex; gap: 9px; flex-wrap: wrap; margin-top: 14px; }
+.brightspace-result { margin-top: 18px; border: 1px solid #604a55; border-radius: 10px; padding: 14px; background: #30262e; }
+.brightspace-result p { margin-top: 0; }
+.brightspace-result dl { display: grid; gap: 8px; margin: 0; }
+.brightspace-result dl div { display: flex; gap: 12px; justify-content: space-between; font-size: 11px; }
+.brightspace-result dt { color: #bda9b3; }
+.brightspace-result dd { margin: 0; overflow-wrap: anywhere; text-align: right; }
+.brightspace-problem { color: #ffd6dc !important; }
+.brightspace-caution { margin-top: 16px; border-left: 3px solid #c58d9b; padding-left: 12px; }

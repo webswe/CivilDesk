@@ -1,4 +1,5 @@
 mod academic;
+mod brightspace;
 mod calendar;
 mod challenges;
 mod dates;
@@ -22,6 +23,46 @@ use productivity::{TaskInput, WorkspaceData};
 use projects::{FileReference, JournalEntry, Milestone, Project, ProjectsData};
 use study::{StudyBlockInput, StudyData, StudyGoal};
 use tauri::Manager;
+
+struct BrightspaceState(brightspace::Adapter);
+
+#[tauri::command]
+fn brightspace_configuration(
+    app: tauri::AppHandle,
+) -> Result<Option<brightspace::ConfigView>, String> {
+    let db = app.state::<RuntimeState>();
+    app.state::<BrightspaceState>()
+        .0
+        .configuration(db.database()?)
+}
+
+#[tauri::command]
+fn brightspace_save_configuration(
+    app: tauri::AppHandle,
+    portal_origin: String,
+    executable_path: String,
+) -> Result<brightspace::ConfigView, String> {
+    let db = app.state::<RuntimeState>();
+    app.state::<BrightspaceState>()
+        .0
+        .save(db.database()?, &portal_origin, &executable_path)
+}
+
+#[tauri::command]
+async fn brightspace_inspect(app: tauri::AppHandle) -> Result<brightspace::Inspection, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<RuntimeState>();
+        let service = app.state::<BrightspaceState>();
+        Ok(service.0.inspect(db.database()?))
+    })
+    .await
+    .map_err(|_| "Brightspace status could not be inspected.".to_string())?
+}
+
+#[tauri::command]
+fn brightspace_cancel(app: tauri::AppHandle) {
+    app.state::<BrightspaceState>().0.cancel();
+}
 
 struct RuntimeState {
     database: Option<Database>,
@@ -781,6 +822,9 @@ pub fn run() {
             app.manage(NotionState(notion::NotionService::production(
                 &app.config().identifier,
             )));
+            app.manage(BrightspaceState(brightspace::Adapter::new(
+                &app.config().identifier,
+            )?));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -870,7 +914,11 @@ pub fn run() {
             notion_open_in_notion,
             notion_open_link,
             notion_set_source_selected,
-            notion_selected_sources
+            notion_selected_sources,
+            brightspace_configuration,
+            brightspace_save_configuration,
+            brightspace_inspect,
+            brightspace_cancel
         ])
         .run(tauri::generate_context!())
         .expect("CivilDesk could not start");
