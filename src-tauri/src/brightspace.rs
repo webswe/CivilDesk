@@ -123,6 +123,48 @@ pub struct AssignmentCompleteness {
     pub page_size_ceiling: Option<usize>,
 }
 
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GradeItem {
+    pub course_id: String,
+    pub label: String,
+    pub displayed_points: Option<String>,
+    pub displayed_grade: Option<String>,
+    pub displayed_weight: Option<String>,
+    pub feedback_availability: String,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Announcement {
+    pub course_id: String,
+    pub announcement_id: String,
+    pub title: String,
+    pub body: Option<String>,
+    pub detail_reference: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClassPage<T: Serialize> {
+    pub course_id: String,
+    pub retrieved_at_ms: Option<u64>,
+    pub completeness: Option<&'static str>,
+    pub error: Option<&'static str>,
+    pub items: Vec<T>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClassSnapshot<T: Serialize> {
+    pub portal_origin: String,
+    pub mode: &'static str,
+    pub retrieved_at_ms: u64,
+    pub courses: Vec<BrightspaceCourse>,
+    pub results: Vec<ClassPage<T>>,
+    pub limited_course_count: bool,
+}
+
 impl Inspection {
     fn new(
         state: &str,
@@ -357,6 +399,119 @@ impl Adapter {
             }
         }
         Ok(AssignmentSnapshot {
+            portal_origin: config.portal_origin,
+            mode: "synthetic_cli",
+            retrieved_at_ms: now_ms(),
+            courses,
+            results,
+            limited_course_count,
+        })
+    }
+
+    pub fn grades(&self, db: &Database) -> Result<ClassSnapshot<GradeItem>, String> {
+        self.class_pages(db, "grades", parse_grades, demo_grades)
+    }
+
+    pub fn announcements(&self, db: &Database) -> Result<ClassSnapshot<Announcement>, String> {
+        self.class_pages(db, "announcements", parse_announcements, demo_announcements)
+    }
+
+    fn class_pages<T: Serialize>(
+        &self,
+        db: &Database,
+        command: &'static str,
+        parse: fn(&Output, &str) -> Result<Vec<T>, ()>,
+        demo: fn() -> ClassSnapshot<T>,
+    ) -> Result<ClassSnapshot<T>, String> {
+        if self.course_mode() == "demo" {
+            return Ok(demo());
+        }
+        if self.course_mode() != "synthetic_cli" {
+            return Err("Brightspace academic retrieval is unavailable in this build.".into());
+        }
+        // No frontend course ID reaches this method. The fixed list comes from
+        // the same restricted synthetic course read used by Assignments.
+        let catalog = self.courses(db)?;
+        let limited_course_count = catalog.courses.len() > 12;
+        let courses: Vec<_> = catalog.courses.into_iter().take(12).collect();
+        let _guard = self
+            .in_flight
+            .try_lock()
+            .map_err(|_| "A Brightspace check is already running.")?;
+        self.cancelled.store(false, Ordering::SeqCst);
+        let config = self
+            .load(db)?
+            .ok_or("Configure the synthetic Brightspace connection first.")?;
+        if config.portal_origin != catalog.portal_origin {
+            return Err("The synthetic portal changed during refresh.".into());
+        }
+        let canonical = PathBuf::from(&config.executable_path)
+            .canonicalize()
+            .map_err(|_| "The synthetic executable is unavailable.")?;
+        if !canonical.is_file()
+            || canonical.to_string_lossy() != config.executable_path
+            || self
+                .check_synthetic_boundary(&config.portal_origin, &canonical)
+                .is_err()
+            || file_sha256(&canonical).as_deref() != Ok(config.executable_sha256.as_str())
+        {
+            return Err("The synthetic executable is not trusted.".into());
+        }
+        let mut results = Vec::with_capacity(courses.len());
+        for course in &courses {
+            if self.cancelled.load(Ordering::SeqCst) {
+                return Err("Academic refresh was cancelled.".into());
+            }
+            let args = [
+                command,
+                "list",
+                "--course",
+                course.id.as_str(),
+                "--json",
+                "--include-completeness",
+            ];
+            let parsed = self
+                .run(
+                    &canonical,
+                    &config.executable_sha256,
+                    &config.portal_origin,
+                    &args,
+                )
+                .map_err(|kind| {
+                    if kind == "cancelled" {
+                        "Academic refresh was cancelled."
+                    } else {
+                        "This course could not be read."
+                    }
+                })
+                .and_then(|output| {
+                    if output.exit_code != 0 {
+                        return Err("This course could not be read.");
+                    }
+                    parse(&output, &course.id)
+                        .map_err(|_| "This course returned invalid academic data.")
+                });
+            match parsed {
+                Ok(items) => results.push(ClassPage {
+                    course_id: course.id.clone(),
+                    retrieved_at_ms: Some(now_ms()),
+                    completeness: Some("unknown"),
+                    error: None,
+                    items,
+                }),
+                Err(_) if self.cancelled.load(Ordering::SeqCst) => {
+                    return Err("Academic refresh was cancelled.".into());
+                }
+                Err(message) => results.push(ClassPage {
+                    course_id: course.id.clone(),
+                    retrieved_at_ms: None,
+                    completeness: None,
+                    error: Some(message),
+                    items: vec![],
+                }),
+            }
+        }
+        Ok(ClassSnapshot {
             portal_origin: config.portal_origin,
             mode: "synthetic_cli",
             retrieved_at_ms: now_ms(),
@@ -726,6 +881,65 @@ fn demo_courses() -> CourseSnapshot {
     ] }
 }
 
+fn demo_grades() -> ClassSnapshot<GradeItem> {
+    let catalog = demo_courses();
+    let results = catalog
+        .courses
+        .iter()
+        .map(|course| ClassPage {
+            course_id: course.id.clone(),
+            retrieved_at_ms: Some(now_ms()),
+            completeness: Some("unknown"),
+            error: None,
+            items: vec![GradeItem {
+                course_id: course.id.clone(),
+                label: "Fictional practice set".into(),
+                displayed_points: Some("0".into()),
+                displayed_grade: None,
+                displayed_weight: None,
+                feedback_availability: "unknown".into(),
+            }],
+        })
+        .collect();
+    ClassSnapshot {
+        portal_origin: catalog.portal_origin,
+        mode: "demo",
+        retrieved_at_ms: now_ms(),
+        courses: catalog.courses,
+        results,
+        limited_course_count: false,
+    }
+}
+
+fn demo_announcements() -> ClassSnapshot<Announcement> {
+    let catalog = demo_courses();
+    let results = catalog
+        .courses
+        .iter()
+        .map(|course| ClassPage {
+            course_id: course.id.clone(),
+            retrieved_at_ms: Some(now_ms()),
+            completeness: Some("unknown"),
+            error: None,
+            items: vec![Announcement {
+                course_id: course.id.clone(),
+                announcement_id: "501".into(),
+                title: "Fictional class update".into(),
+                body: Some("Sample details for this fictional class.".into()),
+                detail_reference: format!("/d2l/le/news/{}/501/view", course.id),
+            }],
+        })
+        .collect();
+    ClassSnapshot {
+        portal_origin: catalog.portal_origin,
+        mode: "demo",
+        retrieved_at_ms: now_ms(),
+        courses: catalog.courses,
+        results,
+        limited_course_count: false,
+    }
+}
+
 fn demo_assignments() -> AssignmentSnapshot {
     let catalog = demo_courses();
     let make = |course: &BrightspaceCourse, id: &str, name: &str, due: Option<&str>| {
@@ -970,6 +1184,74 @@ fn parse_assignments(output: &Output, course_id: &str) -> Result<AssignmentEnvel
         }
     }
     Ok(page)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GradeEnvelope {
+    grade_items: Vec<GradeItem>,
+    completeness: String,
+}
+
+fn parse_grades(output: &Output, course_id: &str) -> Result<Vec<GradeItem>, ()> {
+    if output.exit_code != 0 || !valid_assignment_id(course_id) {
+        return Err(());
+    }
+    let page: GradeEnvelope = serde_json::from_slice(&output.stdout).map_err(|_| ())?;
+    if page.completeness != "unknown" || page.grade_items.len() > 200 {
+        return Err(());
+    }
+    for item in &page.grade_items {
+        if item.course_id != course_id
+            || item.label.trim().is_empty()
+            || item.label.len() > 400
+            || item
+                .displayed_points
+                .as_ref()
+                .is_some_and(|s| s.len() > 300)
+            || item.displayed_grade.as_ref().is_some_and(|s| s.len() > 300)
+            || item
+                .displayed_weight
+                .as_ref()
+                .is_some_and(|s| s.len() > 300)
+            || !["none", "present", "unknown"].contains(&item.feedback_availability.as_str())
+        {
+            return Err(());
+        }
+    }
+    Ok(page.grade_items)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AnnouncementEnvelope {
+    announcements: Vec<Announcement>,
+    completeness: String,
+}
+
+fn parse_announcements(output: &Output, course_id: &str) -> Result<Vec<Announcement>, ()> {
+    if output.exit_code != 0 || !valid_assignment_id(course_id) {
+        return Err(());
+    }
+    let page: AnnouncementEnvelope = serde_json::from_slice(&output.stdout).map_err(|_| ())?;
+    if page.completeness != "unknown" || page.announcements.len() > 200 {
+        return Err(());
+    }
+    let mut ids = std::collections::HashSet::new();
+    for item in &page.announcements {
+        if item.course_id != course_id
+            || !valid_assignment_id(&item.announcement_id)
+            || !ids.insert(item.announcement_id.as_str())
+            || item.title.trim().is_empty()
+            || item.title.len() > 400
+            || item.body.as_ref().is_some_and(|s| s.len() > 12_000)
+            || item.detail_reference
+                != format!("/d2l/le/news/{course_id}/{}/view", item.announcement_id)
+        {
+            return Err(());
+        }
+    }
+    Ok(page.announcements)
 }
 
 #[derive(Deserialize)]
@@ -1373,6 +1655,66 @@ mod tests {
             assert_eq!(adapter.course_mode(), "unavailable");
             assert!(adapter.courses(&db).is_err());
             assert!(adapter.assignments(&db).is_err());
+            assert!(adapter.grades(&db).is_err());
+            assert!(adapter.announcements(&db).is_err());
+        }
+    }
+    #[test]
+    fn grade_pages_preserve_display_values_and_reject_unverified_shapes() {
+        let item = json!({"course_id":"610101","label":"Duplicate title","displayed_points":"0",
+            "displayed_grade":null,"displayed_weight":"12.5%","feedback_availability":"unknown"});
+        let good = Output {
+            stdout: serde_json::to_vec(
+                &json!({"grade_items":[item.clone(),item.clone()],"completeness":"unknown"}),
+            )
+            .unwrap(),
+            exit_code: 0,
+        };
+        let parsed = parse_grades(&good, "610101").unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].displayed_points.as_deref(), Some("0"));
+        assert_eq!(parsed[0].displayed_grade, None);
+        for bad in [
+            json!({"grade_items":[item.clone()]}),
+            json!({"grade_items":[item.clone()],"completeness":"complete"}),
+            json!({"grade_items":[{"course_id":"610202","label":"Wrong","displayed_points":null,"displayed_grade":null,"displayed_weight":null,"feedback_availability":"none"}],"completeness":"unknown"}),
+            json!({"grade_items":[{"course_id":"610101","label":"X","displayed_points":null,"displayed_grade":null,"displayed_weight":null,"feedback_availability":"invented"}],"completeness":"unknown"}),
+        ] {
+            let output = Output {
+                stdout: serde_json::to_vec(&bad).unwrap(),
+                exit_code: 0,
+            };
+            assert!(parse_grades(&output, "610101").is_err());
+        }
+    }
+    #[test]
+    fn announcement_pages_require_course_bound_identity_and_plain_contract() {
+        let item = json!({"course_id":"610101","announcement_id":"501","title":"Duplicate title",
+            "body":"<script>literal text</script>","detail_reference":"/d2l/le/news/610101/501/view"});
+        let good = Output {
+            stdout: serde_json::to_vec(
+                &json!({"announcements":[item.clone()],"completeness":"unknown"}),
+            )
+            .unwrap(),
+            exit_code: 0,
+        };
+        assert_eq!(
+            parse_announcements(&good, "610101").unwrap()[0]
+                .body
+                .as_deref(),
+            Some("<script>literal text</script>")
+        );
+        for bad in [
+            json!({"announcements":[item.clone(),item.clone()],"completeness":"unknown"}),
+            json!({"announcements":[item.clone()],"completeness":"complete"}),
+            json!({"announcements":[{"course_id":"610101","announcement_id":"501","title":"X","body":null,"detail_reference":"https://outside.example.test"}],"completeness":"unknown"}),
+            json!({"announcements":[{"course_id":"610202","announcement_id":"501","title":"X","body":null,"detail_reference":"/d2l/le/news/610202/501/view"}],"completeness":"unknown"}),
+        ] {
+            let output = Output {
+                stdout: serde_json::to_vec(&bad).unwrap(),
+                exit_code: 0,
+            };
+            assert!(parse_announcements(&output, "610101").is_err());
         }
     }
     #[test]

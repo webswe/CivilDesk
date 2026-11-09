@@ -201,6 +201,114 @@ fn main() {
         );
         return;
     }
+    if args.len() == 6
+        && matches!(args[0].as_str(), "grades" | "announcements")
+        && args[1] == "list"
+        && args[2] == "--course"
+        && args[4] == "--json"
+        && args[5] == "--include-completeness"
+        && matches!(args[3].as_str(), "610101" | "610202")
+    {
+        let kind = args[0].as_str();
+        let id = args[3].as_str();
+        let scenario_kind = if kind == "grades" {
+            "grades"
+        } else {
+            "announcements"
+        };
+        if scenario == format!("{scenario_kind}_timeout") {
+            std::thread::sleep(Duration::from_secs(30));
+        }
+        if scenario == format!("{scenario_kind}_oversized") {
+            let _ = std::io::stdout().write_all(&vec![b'x'; 40_000]);
+            return;
+        }
+        if scenario == format!("{scenario_kind}_invalid_json") {
+            print!("{{bad");
+            return;
+        }
+        if scenario == format!("{scenario_kind}_failure")
+            || (scenario == format!("{scenario_kind}_partial_failure") && id == "610202")
+        {
+            eprintln!("Synthetic academic failure.");
+            std::process::exit(1);
+        }
+        if kind == "grades" {
+            let item = |label: &str,
+                        points: Option<&str>,
+                        grade: Option<&str>,
+                        weight: Option<&str>,
+                        feedback: &str| {
+                json!({"course_id":id,"label":label,"displayed_points":points,"displayed_grade":grade,
+                    "displayed_weight":weight,"feedback_availability":feedback})
+            };
+            let items = if scenario == "grades_empty" {
+                vec![]
+            } else if scenario == "grades_malformed" {
+                vec![json!({"course_id":"999","label":"Wrong course"})]
+            } else if id == "610101" {
+                vec![
+                    item(
+                        "Fictional design brief",
+                        Some("7 / 11"),
+                        Some("Custom mark"),
+                        None,
+                        "none",
+                    ),
+                    item(
+                        "Fictional design brief",
+                        None,
+                        None,
+                        Some("12.5%"),
+                        "present",
+                    ),
+                    item(
+                        "A very long fictional laboratory grade item title for a narrow window",
+                        Some("0"),
+                        Some("Pending review"),
+                        Some("0%"),
+                        "unknown",
+                    ),
+                ]
+            } else {
+                vec![item(
+                    "Fictional studio exercise",
+                    Some("A"),
+                    None,
+                    None,
+                    "none",
+                )]
+            };
+            println!("{}", json!({"grade_items":items,"completeness":"unknown"}));
+        } else {
+            let item = |number: &str, title: &str, body: Option<&str>| {
+                json!({
+                    "course_id":id,"announcement_id":number,"title":title,"body":body,
+                    "detail_reference":format!("/d2l/le/news/{id}/{number}/view")
+                })
+            };
+            let items = if scenario == "announcements_empty" {
+                vec![]
+            } else if scenario == "announcements_malformed" {
+                vec![
+                    json!({"course_id":id,"announcement_id":"bad","title":"Malformed","body":null,"detail_reference":"https://unsafe.example.test"}),
+                ]
+            } else if id == "610101" {
+                vec![
+                    item("501", "Fictional studio update", Some("First paragraph.\n\n- First item\n- Second item")),
+                    item("502", "Fictional studio update", Some("<script>alert('sample')</script> https://outside.example.test/image.png")),
+                    item("503", "A very long fictional announcement title that wraps on a narrow display", Some("This fictional announcement has a longer body.\n\nIt remains plain text, with no embedded resources or automatically opened links.")),
+                ]
+            } else {
+                vec![item("601", "Fictional schedule note", None)]
+            };
+            println!(
+                "{}",
+                json!({"announcements":items,"completeness":"unknown"})
+            );
+        }
+        return;
+    }
     if args.iter().map(String::as_str).collect::<Vec<_>>() != status {
         std::process::exit(8);
     }
