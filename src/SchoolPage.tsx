@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Archive, CalendarPlus, ChevronLeft, ChevronRight, Pencil, Play, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { Modal } from './components/Modal';
+import { ClassesWorkspace } from './ClassesWorkspace';
 import { BlockDialog, GoalDialog, StudyView } from './StudyPanel';
 import { assessmentStudy, editBlockDraft, formatMinutes, newBlockDraft, type BlockDraft, goalProgress, timeRange, upcomingBlocks, weekStartOf, weekTotals } from './domain/study';
 import type { StudyBlock, StudyBlockInput, StudyData, StudyGoal } from './services/study';
@@ -51,7 +52,7 @@ export function SchoolPage({ data, academic, study, focus, startWithNew, ops, ru
   const [courseForm, setCourseForm] = useState<CourseInput | null>(null);
   const [work, setWork] = useState<(CourseworkInput & { isNew: boolean }) | null>(null);
   const [formError, setFormError] = useState('');
-  const [view, setView] = useState<'overview' | 'study'>(focus?.view ?? 'overview');
+  const [view, setView] = useState<'overview' | 'classes' | 'study'>(focus?.view ?? 'overview');
   const [blockDraft, setBlockDraft] = useState<BlockDraft | null>(null);
   const [goalCourse, setGoalCourse] = useState<Course | null>(null);
 
@@ -120,9 +121,11 @@ export function SchoolPage({ data, academic, study, focus, startWithNew, ops, ru
     {semester && !readOnly && <button className="primary-button" disabled={!courses.length} title={courses.length ? undefined : 'Add a course first'} onClick={() => openNewWork()}><Plus size={14}/> Add coursework</button>}
   </div>;
 
-  const viewTabs = semester ? <div className="segmented school-views" role="group" aria-label="School view">{(['overview', 'study'] as const).map(v => <button key={v} className={view === v ? 'active' : ''} aria-pressed={view === v} onClick={() => { setView(v); if (v === 'overview') setCourseId(null); }}>{v === 'overview' ? 'Overview' : 'Study'}</button>)}</div> : null;
+  const viewTabs = <div className="segmented school-views" role="group" aria-label="School view">{(semester ? ['overview', 'classes', 'study'] as const : ['overview', 'classes'] as const).map(v => <button key={v} className={view === v ? 'active' : ''} aria-pressed={view === v} onClick={() => { setView(v); if (v === 'overview') setCourseId(null); }}>{v === 'overview' ? 'Overview' : v === 'classes' ? 'Classes' : 'Study'}</button>)}</div>;
   let body: ReactNode;
-  if (!semester) {
+  if (view === 'classes') {
+    body = null;
+  } else if (!semester) {
     body = <div className="empty-state"><h2>No semesters yet</h2><p>Create a semester to organize your courses, assignments, quizzes and exams.</p><button className="primary-button" onClick={() => { setFormError(''); setSemDraft(blankSemester(hasActive)); }}>Create your first semester</button></div>;
   } else if (view === 'study') {
     body = <StudyView study={study} academic={academic} courses={courses} tasks={data.tasks} now={now} highlightBlock={focus?.blockId ?? null} schedule={() => openBlock()} editBlock={b => openBlock(undefined, null, b)} startBlock={b => startStudy({ blockId: b.id, courseId: b.courseId, taskId: b.taskId })} startFocus={() => startStudy({})} setCancelled={(id, cancelled) => run(() => ops.cancelBlock(id, cancelled))} editGoal={c => { setFormError(''); setGoalCourse(c); }}/>;
@@ -156,7 +159,7 @@ export function SchoolPage({ data, academic, study, focus, startWithNew, ops, ru
       </section>
       {courses.length > 0 && (nextBlock || weekDone.sessions > 0) && <p className="quiet-note study-glance" aria-label="Study at a glance">{[nextBlock ? 'Next study: ' + relativeDay(nextBlock.startDate, now) + ' ' + timeRange(nextBlock) + ' · ' + (academic.courses.find(c => c.id === nextBlock.courseId)?.code ?? '') : '', weekDone.sessions ? 'Studied ' + formatMinutes(weekDone.minutes) + ' this week' : ''].filter(Boolean).join(' · ')} <button className="text-link" onClick={() => setView('study')}>Open Study</button></p>}
       <section aria-labelledby="courses-heading" className="school-section">
-        <h2 id="courses-heading">Courses</h2>
+        <div className="classes-overview-link"><h2 id="courses-heading">Courses</h2><button className="text-link" onClick={() => setView('classes')}>Explore Classes <ChevronRight size={14}/></button></div>
         {courses.length ? <div className="course-grid">{courses.map(c => { const mine = courseworkFor(items, c.id); const open = mine.filter(i => !i.task.completedAtMs); const nextDue = open.find(i => i.task.dueDate);
           return <button key={c.id} className="course-card" onClick={() => { setCourseId(c.id); setTab('upcoming'); }}><span className="course-swatch" style={{ background: c.color || '#6b5360' }} aria-hidden="true"/><span><strong>{c.code}</strong><span className="course-name">{c.name}</span><small>{open.length} open{nextDue ? ' · next ' + formatDue(nextDue.task.dueDate!, nextDue.task.dueTime, now).text.replace('Overdue · ', '') : ''}</small></span><ChevronRight size={15}/></button>; })}</div>
           : <div className="empty-state"><h2>No courses in {semester.name}</h2><p>{readOnly ? 'This semester is archived.' : 'Add the classes you are taking this semester.'}</p>{!readOnly && <button className="primary-button" onClick={() => { setFormError(''); setCourseForm(blankCourse(semester.id)); }}>Add a course</button>}</div>}
@@ -171,7 +174,7 @@ export function SchoolPage({ data, academic, study, focus, startWithNew, ops, ru
   }
 
   const above = <div className="school-workspace">
-    {semesterBar}{viewTabs}{body}
+    {semesterBar}{viewTabs}<ClassesWorkspace active={view === 'classes'} localCourses={academic.courses.filter(c => !c.archived)} onOpenLocal={id => { setCourseId(id); setSemesterId(academic.courses.find(c => c.id === id)?.semesterId ?? null); setView('overview'); }}/>{body}
     <BlockDialog draft={blockDraft} setDraft={setBlockDraft} courses={blockCourses} academic={academic} tasks={data.tasks} error={formError} onClose={close} onSave={d => { const { isNew, ...input } = d; void isNew; void submit(() => ops.saveBlock(input)); }}/>
     <GoalDialog key={goalCourse?.id ?? 'none'} course={goalCourse} goal={goalCourse ? study.goals.filter(g => g.courseId === goalCourse.id && g.effectiveWeek <= week).sort((a, b) => b.effectiveWeek.localeCompare(a.effectiveWeek))[0] ?? null : null} week={week} error={formError} onClose={close} onSave={g => void submit(() => ops.saveGoal(g))}/>
     <Modal open={Boolean(semDraft)} title={semDraft && academic.semesters.some(s => s.id === semDraft.id) ? 'Edit semester' : 'New semester'} onClose={close}>{semDraft && (() => {

@@ -2,8 +2,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { $, browser, expect } from '@wdio/globals';
-import { onboard, restartApp } from '../lib/app.mjs';
+import { $, $$, browser, expect } from '@wdio/globals';
+import { go, onboard, restartApp } from '../lib/app.mjs';
 import { e2eDataPaths } from '../lib/guard.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -90,5 +90,69 @@ describe('Brightspace connection foundation (synthetic executable only)', () => 
     expect(result.state).toBe('cancelled');
     scenario('missing');
     expect((await inspect()).state).toBe('authentication_required');
+  });
+
+  it('lists distinct synthetic courses without importing local School records', async () => {
+    scenario('courses_duplicate_names');
+    const before = (await invoke('load_academic')).value;
+    const result = await invoke('brightspace_courses');
+    expect(result.ok).toBe(true);
+    expect(result.value).toMatchObject({ portalOrigin: origin, mode: 'synthetic_cli', complete: true, warnings: [] });
+    expect(result.value.courses.map(c => c.id)).toEqual(['610101', '610102']);
+    expect(result.value.courses.map(c => c.name)).toEqual(['Shared Title', 'Shared Title']);
+    expect((await invoke('load_academic')).value).toEqual(before);
+  });
+
+  it('keeps empty and missing metadata distinct from failed retrieval', async () => {
+    scenario('courses_empty'); expect((await invoke('brightspace_courses')).value.courses).toEqual([]);
+    scenario('courses_missing_optional');
+    const result = (await invoke('brightspace_courses')).value;
+    expect(result.courses[0]).toMatchObject({ id: '610303', code: '', semester_name: '', start_date: null, end_date: null });
+    for (const value of ['courses_malformed', 'courses_invalid_json', 'courses_failure']) {
+      scenario(value); const response = await invoke('brightspace_courses');
+      expect(response.ok).toBe(false); expect(response.error).not.toContain('Synthetic failure');
+    }
+  });
+
+  it('bounds and cancels synthetic course reads', async () => {
+    scenario('courses_oversized'); expect((await invoke('brightspace_courses')).ok).toBe(false);
+    scenario('courses_timeout'); expect((await invoke('brightspace_courses')).error).toContain('time');
+    const result = await browser.executeAsync(done => {
+      const pending = window.__TAURI_INTERNALS__.invoke('brightspace_courses');
+      setTimeout(() => { void window.__TAURI_INTERNALS__.invoke('brightspace_cancel'); }, 300);
+      pending.then(value => done({ value }), error => done({ message: String(error) }));
+    });
+    expect(result.message).toContain('cancelled');
+  });
+
+  it('opens Classes, searches, selects a source identity, and retains stale data after a failed refresh', async () => {
+    scenario('courses_duplicate_names'); await go('School'); await $('button=Classes').click();
+    await expect($('.classes-workspace')).toBeDisplayed();
+    await expect($('.classes-status')).toHaveText(expect.stringContaining('not loaded'));
+    await $('button=Refresh sample').waitForEnabled(); await $('button=Refresh sample').click();
+    await expect($$('.classes-card')).toBeElementsArrayOfSize(2);
+    await $('.classes-card').click();
+    await expect($('.classes-detail')).toHaveText(expect.stringContaining('Course ID'));
+    await expect($('.classes-detail')).toHaveText(expect.stringContaining('610101'));
+    await $('button=Back to Classes').click();
+    await $('input[aria-label="Search classes"]').setValue('CIV 202');
+    await expect($$('.classes-card')).toBeElementsArrayOfSize(1);
+    await $('input[aria-label="Search classes"]').setValue('Shared title');
+    await expect($$('.classes-card')).toBeElementsArrayOfSize(2);
+    scenario('courses_invalid_json'); await $('button=Refresh sample').click();
+    await expect($('.classes-status')).toHaveText(expect.stringContaining('last successful sample'));
+    await expect($$('.classes-card')).toBeElementsArrayOfSize(2);
+  });
+
+  it('shows an honest empty state and clears transient cache after restart', async () => {
+    scenario('courses_empty'); await $('button=Refresh sample').click();
+    await expect($('section[aria-labelledby="sample-classes-heading"] .classes-empty')).toHaveText(expect.stringContaining('sample course list is empty'));
+    await restartApp(); await go('School'); await $('button=Classes').click();
+    await expect($('.classes-status')).toHaveText(expect.stringContaining('not loaded'));
+    expect((await invoke('load_academic')).value.courses).toEqual([]);
+    scenario('courses_missing_optional'); await $('button=Refresh sample').click();
+    await expect($$('.classes-card')).toBeElementsArrayOfSize(1);
+    await $('.classes-card').click();
+    await expect($('.classes-detail')).toHaveText(expect.stringContaining('Term unavailable'));
   });
 });
