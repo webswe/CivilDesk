@@ -43,5 +43,7 @@ export function resetE2eData(env = process.env) {
     throw new Error('Set CIVILDESK_E2E_ALLOW_RESET=1 to let the E2E harness reset its own "' + E2E_IDENTIFIER + '" data folders.');
   }
   const { data, webview } = e2eDataPaths(env);
-  for (const target of [data, webview]) fs.rmSync(assertDisposable(target, env), { recursive: true, force: true });
+  // WebView2 can release its profile handle just after the application exits. Retry only
+  // the already-validated disposable E2E paths; never broaden the deletion boundary.
+  for (const target of [data, webview]) fs.rmSync(assertDisposable(target, env), { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
 }

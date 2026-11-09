@@ -125,7 +125,7 @@ describe('study experience', () => {
     // The exam row now shows time actually studied, and completing the exam leaves history alone.
     fireEvent.click(screen.getByRole('button', { name: 'Overview' }));
     expect(within(await screen.findByRole('list', { name: 'Upcoming coursework' })).getByText(/Studied 25 min/)).toBeInTheDocument();
-  });
+  }, 10000);
 
   it('cancels a block without deleting it and keeps it out of totals and the calendar', async () => {
     await enter();

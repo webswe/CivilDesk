@@ -246,6 +246,65 @@ describe('Brightspace connection foundation (synthetic executable only)', () => 
     await expect($$('.assignment-card.synthetic')).toBeElementsArrayOfSize(0);
   });
 
+  it('plans local assignment study only after confirmation and opens Focus from the saved block', async () => {
+    await $('.assignment-card.local').click();
+    const before = (await invoke('load_study')).value.blocks.length;
+    await $('button=Plan Study Session').click();
+    await $('//dialog[@open]').waitForDisplayed();
+    await expect(field('For coursework', 'select')).toHaveText(expect.stringContaining('Design brief'));
+    await expect($('//dialog[@open]')).toHaveText(expect.stringContaining('CivilDesk local assignment'));
+    await expect($('//dialog[@open]')).toHaveText(expect.stringContaining('Due ' + localDate(3)));
+    await browser.setWindowSize(700, 760);
+    await browser.saveScreenshot(path.join(root, 'e2e/results/screenshots/assignment-study-local-narrow.png'));
+    await browser.setWindowSize(1280, 820);
+    expect(await field('Date').getValue()).toBe('');
+    expect(await field('Start time').getValue()).toBe('');
+    await dialogButton('Cancel').click();
+    expect((await invoke('load_study')).value.blocks).toHaveLength(before);
+    await $('button=Back to assignment').click();
+    await $('button=Plan Study Session').click();
+    await setField(await field('Date'), localDate(1));
+    await setField(await field('Start time'), '18:30');
+    await setField(await field('Minutes'), '30');
+    await dialogButton('Save study block').click();
+    await expect($('//ul[@aria-label="Upcoming study blocks"]')).toHaveText(expect.stringContaining('Design brief'));
+    await $('button=Back to assignment').click();
+    await expect($('.assignment-detail')).toHaveText(expect.stringContaining('Design brief'));
+    const blocks = (await invoke('load_study')).value.blocks;
+    expect(blocks).toHaveLength(before + 1);
+    expect(blocks.at(-1)).toMatchObject({ taskId: (await invoke('load_academic')).value.work[0].taskId, startTime: '18:30', durationMinutes: 30 });
+    expect((await invoke('load_academic')).value.work).toHaveLength(1);
+    await $('//div[@aria-label="School view"]//button[normalize-space(.)="Study"]').click();
+    await $('button[aria-label="Start studying Design brief"]').click();
+    await expect($('//h1[normalize-space(.)="Focus"]')).toBeDisplayed();
+    expect((await invoke('load_study')).value.sessions).toHaveLength(0);
+    await restartApp(); await go('School'); await $('//div[@aria-label="School view"]//button[normalize-space(.)="Study"]').click();
+    await expect($('//ul[@aria-label="Upcoming study blocks"]')).toHaveText(expect.stringContaining('Design brief'));
+  });
+
+  it('keeps synthetic assignment planning as an in-memory preview without academic imports', async () => {
+    await $('button=Assignment Calendar').click();
+    scenario('missing'); await $('.assignment-calendar').$('button=Refresh sample').click();
+    await expect($('.assignment-status')).toHaveText(expect.stringContaining('Sample retrieved'));
+    await $('.assignment-main section:last-child .assignment-card.synthetic').click();
+    const academicBefore = (await invoke('load_academic')).value;
+    const blocksBefore = (await invoke('load_study')).value.blocks.length;
+    await $('button=Plan Study Session').click();
+    await expect($('.assignment-plan-preview')).toHaveText(expect.stringContaining('No study block or coursework is saved'));
+    await setField(await $('.assignment-plan-preview input[type="date"]'), localDate(2));
+    await setField(await $('.assignment-plan-preview input[type="time"]'), '16:15');
+    await expect($('.assignment-plan-preview')).toHaveText(expect.stringContaining('Preview:'));
+    await browser.setWindowSize(700, 760);
+    await $('.assignment-plan-preview').scrollIntoView();
+    await browser.saveScreenshot(path.join(root, 'e2e/results/screenshots/assignment-study-preview-narrow.png'));
+    await browser.setWindowSize(1280, 820);
+    expect((await invoke('load_study')).value.blocks).toHaveLength(blocksBefore);
+    expect((await invoke('load_academic')).value).toEqual(academicBefore);
+    await restartApp(); await go('School'); await $('button=Assignment Calendar').click();
+    await expect($$('.assignment-plan-preview')).toBeElementsArrayOfSize(0);
+    await expect($$('.assignment-card.synthetic')).toBeElementsArrayOfSize(0);
+  });
+
   it('shows grade display values without inventing grades or stable item IDs', async () => {
     scenario('missing'); await go('School'); await $('button=Classes').click();
     await $('button=Refresh sample').click();
