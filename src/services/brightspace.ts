@@ -44,3 +44,22 @@ export async function brightspaceAssignments(): Promise<AssignmentSnapshot> {
     return { courseId: course.id, completeness: { status: 'below_page_size_boundary' as const, observed_row_count: assignments.length, page_size_ceiling: 50 }, error: null, assignments }; });
   return { portalOrigin: catalog.portalOrigin, mode: 'demo', retrievedAtMs: Date.now(), courses: catalog.courses, results, limitedCourseCount: false };
 }
+
+export interface BrightspaceGradeItem { course_id: string; label: string; displayed_points: string | null; displayed_grade: string | null; displayed_weight: string | null; feedback_availability: 'none' | 'present' | 'unknown' }
+export interface BrightspaceAnnouncement { course_id: string; announcement_id: string; title: string; body: string | null; detail_reference: string }
+export interface ClassPage<T> { courseId: string; retrievedAtMs: number | null; completeness: 'unknown' | null; error: string | null; items: T[] }
+export interface ClassSnapshot<T> { portalOrigin: string; mode: 'demo' | 'synthetic_cli'; retrievedAtMs: number; courses: BrightspaceCourse[]; results: ClassPage<T>[]; limitedCourseCount: boolean }
+const sampleSnapshot = <T>(courses: BrightspaceCourse[], items: (course: BrightspaceCourse) => T[]): ClassSnapshot<T> => ({
+  portalOrigin: 'https://synthetic.example.test', mode: 'demo', retrievedAtMs: Date.now(), courses,
+  results: courses.map(course => ({ courseId: course.id, retrievedAtMs: Date.now(), completeness: 'unknown', error: null, items: items(course) })), limitedCourseCount: false,
+});
+export async function brightspaceGrades(): Promise<ClassSnapshot<BrightspaceGradeItem>> {
+  if (native()) return invoke('brightspace_grades');
+  const courses = (await brightspaceCourses()).courses;
+  return sampleSnapshot(courses, course => [{ course_id: course.id, label: 'Fictional practice set', displayed_points: '0', displayed_grade: null, displayed_weight: null, feedback_availability: 'unknown' }]);
+}
+export async function brightspaceAnnouncements(): Promise<ClassSnapshot<BrightspaceAnnouncement>> {
+  if (native()) return invoke('brightspace_announcements');
+  const courses = (await brightspaceCourses()).courses;
+  return sampleSnapshot(courses, course => [{ course_id: course.id, announcement_id: '501', title: 'Fictional class update', body: 'Sample details for this fictional class.', detail_reference: `/d2l/le/news/${course.id}/501/view` }]);
+}

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, RefreshCw, Search, X } from 'lucide-react';
-import { brightspaceCancel, brightspaceCourseMode, brightspaceCourses, type BrightspaceCourse, type BrightspaceCourseMode, type BrightspaceCourseSnapshot } from './services/brightspace';
+import { ChevronRight, RefreshCw, Search, X } from 'lucide-react';
+import { brightspaceAnnouncements, brightspaceCancel, brightspaceCourseMode, brightspaceCourses, brightspaceGrades, type BrightspaceAnnouncement, type BrightspaceGradeItem, type BrightspaceCourseMode, type BrightspaceCourseSnapshot, type ClassSnapshot } from './services/brightspace';
 import type { Course } from './services/academic';
+import { ClassInformation } from './ClassInformation';
 import './classes.css';
 
 const colors = ['#c58d9b', '#a98bd0', '#7aa7d2', '#74b8a2', '#cdb078', '#cf8b7a'];
@@ -18,6 +19,12 @@ export function ClassesWorkspace({ localCourses, onOpenLocal, onOpenCalendar, re
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [offline, setOffline] = useState(() => !navigator.onLine);
+  const [gradeSnapshot, setGradeSnapshot] = useState<ClassSnapshot<BrightspaceGradeItem> | null>(null);
+  const [announcementSnapshot, setAnnouncementSnapshot] = useState<ClassSnapshot<BrightspaceAnnouncement> | null>(null);
+  const [gradeBusy, setGradeBusy] = useState(false);
+  const [announcementBusy, setAnnouncementBusy] = useState(false);
+  const [gradeError, setGradeError] = useState('');
+  const [announcementError, setAnnouncementError] = useState('');
   useEffect(() => { if (requestedCourse) setSelected(requestedCourse); }, [requestedCourse]);
   useEffect(() => {
     if (!requestedCourse || snapshot || !mode || mode === 'unavailable' || offline) return;
@@ -45,8 +52,28 @@ export function ClassesWorkspace({ localCourses, onOpenLocal, onOpenCalendar, re
       setError(typeof reason === 'string' ? reason : 'Classes could not be refreshed.');
     } finally { setBusy(false); }
   };
+  const mergePages = <T,>(previous: ClassSnapshot<T> | null, next: ClassSnapshot<T>): ClassSnapshot<T> => ({
+    ...next, results: next.results.map(result => {
+      const old = previous?.portalOrigin === next.portalOrigin ? previous.results.find(r => r.courseId === result.courseId && r.retrievedAtMs !== null) : null;
+      return result.error && old ? { ...result, items: old.items, retrievedAtMs: old.retrievedAtMs } : result;
+    }),
+  });
+  const refreshGrades = async () => {
+    if (gradeBusy || offline) return;
+    setGradeBusy(true); setGradeError('');
+    try { const next = await brightspaceGrades(); setGradeSnapshot(old => mergePages(old, next)); }
+    catch { setGradeError('Grade refresh failed. Last successful sample may be stale.'); }
+    finally { setGradeBusy(false); }
+  };
+  const refreshAnnouncements = async () => {
+    if (announcementBusy || offline) return;
+    setAnnouncementBusy(true); setAnnouncementError('');
+    try { const next = await brightspaceAnnouncements(); setAnnouncementSnapshot(old => mergePages(old, next)); }
+    catch { setAnnouncementError('Announcement refresh failed. Last successful sample may be stale.'); }
+    finally { setAnnouncementBusy(false); }
+  };
   return <section className="classes-workspace" hidden={!active} aria-label="Classes workspace">
-    {current && snapshot ? <ClassDetail course={current} portal={snapshot.portalOrigin} mode={snapshot.mode} onBack={() => setSelected(null)} onOpenCalendar={onOpenCalendar}/> : <>
+    {current && snapshot ? <ClassInformation key={selected} course={current} portal={snapshot.portalOrigin} mode={snapshot.mode} offline={offline} onBack={() => setSelected(null)} onOpenCalendar={onOpenCalendar} grades={{ snapshot: gradeSnapshot, busy: gradeBusy, error: gradeError, refresh: refreshGrades }} announcements={{ snapshot: announcementSnapshot, busy: announcementBusy, error: announcementError, refresh: refreshAnnouncements }}/> : <>
       <div className="classes-title"><div><span className="classes-eyebrow">SCHOOL / CLASSES</span><h2>Classes</h2><p>Browse your local courses and, when enabled, a clearly labeled synthetic Brightspace catalog.</p></div><div className="classes-actions">{mode !== 'unavailable' && <button className="soft-button" onClick={() => void refresh()} disabled={busy || offline || !mode}><RefreshCw size={15}/> {busy ? 'Refreshing…' : 'Refresh sample'}</button>}{busy && <button className="soft-button" onClick={() => void brightspaceCancel()}><X size={14}/> Cancel</button>}</div></div>
       <div className="classes-status" role="status">{offline ? 'Offline · showing only available in-memory information.' : mode === 'unavailable' ? 'Brightspace course retrieval is unavailable in this build.' : !mode ? 'Checking sample availability…' : busy ? 'Loading sample courses…' : error && snapshot ? 'Refresh failed · showing the last successful sample.' : snapshot ? `Sample retrieved ${new Date(snapshot.retrievedAtMs).toLocaleString()} · ${snapshot.complete ? 'complete result' : 'incomplete result'}` : 'Sample courses are not loaded. Refresh when ready.'}</div>
       {error && <p className="classes-error" role="alert">{error}</p>}
@@ -57,8 +84,4 @@ export function ClassesWorkspace({ localCourses, onOpenLocal, onOpenCalendar, re
       </section><section aria-labelledby="local-classes-heading"><div className="classes-section-heading"><h3 id="local-classes-heading">Your local courses</h3><span className="classes-source">CivilDesk</span></div>{filtered.local.length ? <div className="classes-local-list">{filtered.local.map(c => <button key={c.id} onClick={() => onOpenLocal(c.id)}><span className="classes-swatch" style={{ background: c.color || colors[0] }}/><span><strong>{c.code}</strong><small>{c.name}</small></span><ChevronRight size={15}/></button>)}</div> : <div className="classes-empty">{localCourses.length ? 'No local courses match this search.' : 'No local courses yet. Add one from School overview.'}</div>}</section></div>
     </>}
   </section>;
-}
-
-function ClassDetail({ course, portal, mode, onBack, onOpenCalendar }: { course: BrightspaceCourse; portal: string; mode: BrightspaceCourseSnapshot['mode']; onBack: () => void; onOpenCalendar?: (courseKey: string) => void }) {
-  return <article className="classes-detail"><button className="text-link" onClick={onBack}><ChevronLeft size={15}/> Back to Classes</button><span className="classes-eyebrow">SYNTHETIC BRIGHTSPACE CLASS</span><h2>{display(course.name, 'Untitled course')}</h2><p className="classes-detail-code">{display(course.code, 'Code unavailable')} · {display(course.semester_name, 'Term unavailable')}</p>{onOpenCalendar && <button className="soft-button" onClick={() => onOpenCalendar(`synthetic:${portal}\u0000${course.id}`)}>View assignments in calendar</button>}<div className="classes-detail-meta"><div><span>Source</span><strong>{mode === 'demo' ? 'CivilDesk sample catalog' : 'Synthetic D2L-CLI fixture'}</strong></div><div><span>Course ID</span><strong>{course.id}</strong></div><div><span>Portal provenance</span><strong>{portal} (synthetic)</strong></div><div><span>Access flag</span><strong>{course.can_access ? 'Available in sample' : 'Unavailable in sample'}</strong></div><div><span>Source status</span><strong>{course.is_active ? 'Active' : 'Inactive'}</strong></div>{course.is_new_enrollment && <div><span>Enrollment</span><strong>New enrollment</strong></div>}{course.start_date && <div><span>Source start date</span><strong>{course.start_date}</strong></div>}{course.end_date && <div><span>Source end date</span><strong>{course.end_date}</strong></div>}</div><section className="classes-coming"><h3>Academic information</h3><p>Assignments, grades, announcements, and course-linked study sessions are unavailable for synthetic Brightspace classes in this phase. Nothing here is imported into your local School records.</p></section></article>;
 }

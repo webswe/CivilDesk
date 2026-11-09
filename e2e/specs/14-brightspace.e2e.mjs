@@ -245,4 +245,89 @@ describe('Brightspace connection foundation (synthetic executable only)', () => 
     await expect($('.assignment-card.local')).toHaveText(expect.stringContaining('Design brief'));
     await expect($$('.assignment-card.synthetic')).toBeElementsArrayOfSize(0);
   });
+
+  it('shows grade display values without inventing grades or stable item IDs', async () => {
+    scenario('missing'); await go('School'); await $('button=Classes').click();
+    await $('button=Refresh sample').click();
+    await $('.classes-card').click();
+    await browser.saveScreenshot(path.join(root, 'e2e/results/screenshots/classes-overview.png'));
+    await $('button=Grades').click();
+    await expect($('.classes-status')).toHaveText(expect.stringContaining('Refresh to load'));
+    await $('.classes-feed').$('button=Refresh sample').click();
+    await expect($$('.classes-feed-card')).toBeElementsArrayOfSize(3);
+    await expect($('.classes-feed')).toHaveText(expect.stringContaining('Source page completeness is unknown'));
+    await expect($('.classes-feed')).toHaveText(expect.stringContaining('Not shown by source; not zero'));
+    await expect($('.classes-feed')).toHaveText(expect.stringContaining('Displayed points'));
+    await expect($('.classes-feed')).toHaveText(expect.stringContaining('0'));
+    await expect($('.classes-feed')).toHaveText(expect.stringContaining('no stable grade-item ID'));
+    await browser.saveScreenshot(path.join(root, 'e2e/results/screenshots/classes-grades-wide.png'));
+    await $('.classes-feed-card:nth-child(3)').scrollIntoView();
+    await browser.saveScreenshot(path.join(root, 'e2e/results/screenshots/classes-grades-content-wide.png'));
+    await browser.setWindowSize(700, 760);
+    await $('.classes-feed-card:nth-child(3)').scrollIntoView();
+    await browser.saveScreenshot(path.join(root, 'e2e/results/screenshots/classes-grades-narrow.png'));
+    await browser.setWindowSize(1280, 820);
+    await $('button=Back to Classes').click();
+    await $('.classes-card:nth-child(2)').click(); await $('button=Grades').click();
+    await expect($('.classes-feed')).toHaveText(expect.stringContaining('Fictional studio exercise'));
+  });
+
+  it('shows announcements as inert text and reports unknown metadata', async () => {
+    await $('button=Back to Classes').click(); await $('.classes-card').click();
+    await $('button=Announcements').click();
+    await $('.classes-feed').$('button=Refresh sample').click();
+    await expect($$('.classes-feed-card')).toBeElementsArrayOfSize(3);
+    await expect($('.classes-feed')).toHaveText(expect.stringContaining("<script>alert('sample')</script>"));
+    await expect($('.classes-feed')).toHaveText(expect.stringContaining('Publication date and author unavailable'));
+    expect(await $$('.classes-feed script, .classes-feed iframe, .classes-feed img, .classes-feed a')).toHaveLength(0);
+    await browser.saveScreenshot(path.join(root, 'e2e/results/screenshots/classes-announcements-wide.png'));
+    await $('.classes-feed-card:nth-child(2)').scrollIntoView();
+    await browser.saveScreenshot(path.join(root, 'e2e/results/screenshots/classes-announcements-content-wide.png'));
+    await browser.setWindowSize(700, 760);
+    await $('.classes-feed-card:nth-child(3)').scrollIntoView();
+    await browser.saveScreenshot(path.join(root, 'e2e/results/screenshots/classes-announcements-narrow.png'));
+    await browser.setWindowSize(1280, 820);
+    await $('button=Back to Classes').click(); await $('.classes-card:nth-child(2)').click(); await $('button=Announcements').click();
+    await expect($('.classes-feed')).toHaveText(expect.stringContaining('Fictional schedule note'));
+  });
+
+  it('keeps an empty announcement page distinct from failed and stale reads', async () => {
+    scenario('announcements_empty'); await $('.classes-feed').$('button=Refresh sample').click();
+    await expect($('.classes-feed')).toHaveText(expect.stringContaining('No announcements were returned in the available page'));
+    scenario('announcements_partial_failure'); await $('.classes-feed').$('button=Refresh sample').click();
+    await expect($('.classes-feed')).toHaveText(expect.stringContaining('This course could not be read'));
+    await expect($('.classes-feed')).not.toHaveText(expect.stringContaining('No announcements were returned'));
+    scenario('announcements_invalid_json'); await $('.classes-feed').$('button=Refresh sample').click();
+    await expect($('.classes-feed')).toHaveText(expect.stringContaining('This course returned invalid academic data'));
+  });
+
+  it('bounds and cancels new synthetic class-information reads', async () => {
+    scenario('grades_oversized');
+    const bounded = (await invoke('brightspace_grades')).value;
+    expect(bounded.results.every(r => r.error && r.items.length === 0)).toBe(true);
+    scenario('announcements_timeout');
+    const cancelled = await browser.executeAsync(done => {
+      const pending = window.__TAURI_INTERNALS__.invoke('brightspace_announcements');
+      setTimeout(() => { void window.__TAURI_INTERNALS__.invoke('brightspace_cancel'); }, 300);
+      pending.then(value => done({ value }), reason => done({ message: String(reason) }));
+    });
+    expect(cancelled.message).toContain('cancelled');
+  });
+
+  it('distinguishes partial, empty, and failed class information and clears it on restart', async () => {
+    scenario('grades_partial_failure');
+    await $('button=Grades').click(); await $('.classes-feed').$('button=Refresh sample').click();
+    await expect($('.classes-feed')).toHaveText(expect.stringContaining('This course could not be read'));
+    await expect($('.classes-feed')).not.toHaveText(expect.stringContaining('No grade items were returned'));
+    await $('button=Back to Classes').click(); await $('.classes-card').click(); await $('button=Grades').click();
+    await expect($('.classes-feed')).toHaveText(expect.stringContaining('Fictional design brief'));
+    scenario('grades_empty'); await $('.classes-feed').$('button=Refresh sample').click();
+    await expect($('.classes-feed')).toHaveText(expect.stringContaining('No grade items were returned in the available page'));
+    await browser.saveScreenshot(path.join(root, 'e2e/results/screenshots/classes-grades-empty.png'));
+    scenario('grades_invalid_json'); await $('.classes-feed').$('button=Refresh sample').click();
+    await expect($('.classes-feed')).toHaveText(expect.stringContaining('This course returned invalid academic data'));
+    await browser.saveScreenshot(path.join(root, 'e2e/results/screenshots/classes-grades-error.png'));
+    await restartApp(); await go('School'); await $('button=Classes').click();
+    await expect($('.classes-status')).toHaveText(expect.stringContaining('not loaded'));
+  });
 });
