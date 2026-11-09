@@ -3,6 +3,7 @@ import { Archive, CalendarPlus, ChevronLeft, ChevronRight, Pencil, Play, Plus, R
 import { Modal } from './components/Modal';
 import { ClassesWorkspace } from './ClassesWorkspace';
 import { AssignmentCalendar } from './AssignmentCalendar';
+import type { CalendarAssignment } from './domain/assignmentCalendar';
 import { BlockDialog, GoalDialog, StudyView } from './StudyPanel';
 import { assessmentStudy, editBlockDraft, formatMinutes, newBlockDraft, type BlockDraft, goalProgress, timeRange, upcomingBlocks, weekStartOf, weekTotals } from './domain/study';
 import type { StudyBlock, StudyBlockInput, StudyData, StudyGoal } from './services/study';
@@ -58,6 +59,7 @@ export function SchoolPage({ data, academic, study, focus, startWithNew, ops, ru
   const [calendarVisited, setCalendarVisited] = useState(false);
   const [requestedClass, setRequestedClass] = useState<string | null>(null);
   const [blockDraft, setBlockDraft] = useState<BlockDraft | null>(null);
+  const [originTaskId, setOriginTaskId] = useState<string | null>(null);
   const [goalCourse, setGoalCourse] = useState<Course | null>(null);
 
   const semester = academic.semesters.find(s => s.id === semesterId) ?? activeSemester(academic) ?? academic.semesters.find(s => !s.archived) ?? academic.semesters[0] ?? null;
@@ -77,7 +79,22 @@ export function SchoolPage({ data, academic, study, focus, startWithNew, ops, ru
     const target = courseId ?? block?.courseId ?? course?.id ?? courses[0]?.id; if (!target) return;
     setFormError(''); setBlockDraft(block ? editBlockDraft(block) : newBlockDraft(target, taskId, now));
   }
+  function planLocalAssignment(item: CalendarAssignment) {
+    if (item.source !== 'local' || !item.taskId) return;
+    const linked = items.find(x => x.task.id === item.taskId && x.course.id === item.courseKey.slice('local:'.length) && x.link.workType === 'assignment');
+    if (!linked || linked.course.archived || academic.semesters.find(s => s.id === linked.course.semesterId)?.archived) return;
+    setSemesterId(linked.course.semesterId);
+    setCourseId(linked.course.id);
+    setOriginTaskId(linked.task.id);
+    setView('study');
+    setFormError('');
+    setBlockDraft({ ...newBlockDraft(linked.course.id, linked.task.id, now), title: linked.task.title.slice(0, 120), startDate: '', startTime: '' });
+  }
   const blockCourses = academic.courses.filter(c => (semester && c.semesterId === semester.id && !c.archived) || c.id === blockDraft?.courseId);
+  const originItem = originTaskId ? items.find(i => i.task.id === originTaskId && i.link.workType === 'assignment') : undefined;
+  const blockSourceContext = originItem && blockDraft?.taskId === originItem.task.id
+    ? `CivilDesk local assignment · ${originItem.course.code} · ${originItem.course.name}${originItem.task.dueDate ? ` · Due ${originItem.task.dueDate}${originItem.task.dueTime ? ` at ${originItem.task.dueTime}` : ''}` : ' · No due date'}`
+    : undefined;
   const semesterStudy = { blocks: study.blocks.filter(b => courses.some(c => c.id === b.courseId)), sessions: study.sessions.filter(s => courses.some(c => c.id === s.courseId)) };
   const nextBlock = upcomingBlocks(semesterStudy, now)[0];
   const weekDone = weekTotals(semesterStudy.sessions, week);
@@ -132,7 +149,7 @@ export function SchoolPage({ data, academic, study, focus, startWithNew, ops, ru
   } else if (!semester) {
     body = <div className="empty-state"><h2>No semesters yet</h2><p>Create a semester to organize your courses, assignments, quizzes and exams.</p><button className="primary-button" onClick={() => { setFormError(''); setSemDraft(blankSemester(hasActive)); }}>Create your first semester</button></div>;
   } else if (view === 'study') {
-    body = <StudyView study={study} academic={academic} courses={courses} tasks={data.tasks} now={now} highlightBlock={focus?.blockId ?? null} schedule={() => openBlock()} editBlock={b => openBlock(undefined, null, b)} startBlock={b => startStudy({ blockId: b.id, courseId: b.courseId, taskId: b.taskId })} startFocus={() => startStudy({})} setCancelled={(id, cancelled) => run(() => ops.cancelBlock(id, cancelled))} editGoal={c => { setFormError(''); setGoalCourse(c); }}/>;
+    body = <>{originItem && <button className="text-link" onClick={() => { setCalendarVisited(true); setView('calendar'); }}><ChevronLeft size={14}/> Back to assignment</button>}<StudyView study={study} academic={academic} courses={courses} tasks={data.tasks} now={now} highlightBlock={focus?.blockId ?? null} schedule={() => openBlock()} editBlock={b => openBlock(undefined, null, b)} startBlock={b => startStudy({ blockId: b.id, courseId: b.courseId, taskId: b.taskId })} startFocus={() => startStudy({})} setCancelled={(id, cancelled) => run(() => ops.cancelBlock(id, cancelled))} editGoal={c => { setFormError(''); setGoalCourse(c); }}/></>;
   } else if (course) {
     const all = courseworkFor(items, course.id);
     const shown = all.filter(i => tab === 'done' ? i.task.completedAtMs : !i.task.completedAtMs && (tab === 'upcoming' || (tab === 'assignments' ? i.link.workType === 'assignment' || i.link.workType === 'general' : i.link.workType === 'quiz' || i.link.workType === 'exam')));
@@ -178,8 +195,8 @@ export function SchoolPage({ data, academic, study, focus, startWithNew, ops, ru
   }
 
   const above = <div className="school-workspace">
-    {semesterBar}{viewTabs}<ClassesWorkspace active={view === 'classes'} localCourses={academic.courses.filter(c => !c.archived)} requestedCourse={requestedClass} onOpenCalendar={key => { setCalendarCourse(key); setCalendarVisited(true); setView('calendar'); }} onOpenLocal={id => { setCourseId(id); setSemesterId(academic.courses.find(c => c.id === id)?.semesterId ?? null); setView('overview'); }}/>{calendarVisited && <AssignmentCalendar active={view === 'calendar'} data={data} academic={academic} requestedCourse={calendarCourse} onOpenCourse={key => { if (key.startsWith('local:')) { const id = key.slice(6); setCourseId(id); setSemesterId(academic.courses.find(c => c.id === id)?.semesterId ?? null); setView('overview'); } else { setRequestedClass(key.slice(10)); setView('classes'); } }} onOpenLocalAssignment={id => { const linked = items.find(i => i.task.id === id); if (linked) { setCourseId(linked.course.id); setSemesterId(linked.course.semesterId); setTab('assignments'); setView('overview'); } }}/>} {body}
-    <BlockDialog draft={blockDraft} setDraft={setBlockDraft} courses={blockCourses} academic={academic} tasks={data.tasks} error={formError} onClose={close} onSave={d => { const { isNew, ...input } = d; void isNew; void submit(() => ops.saveBlock(input)); }}/>
+    {semesterBar}{viewTabs}<ClassesWorkspace active={view === 'classes'} localCourses={academic.courses.filter(c => !c.archived)} requestedCourse={requestedClass} onOpenCalendar={key => { setCalendarCourse(key); setCalendarVisited(true); setView('calendar'); }} onOpenLocal={id => { setCourseId(id); setSemesterId(academic.courses.find(c => c.id === id)?.semesterId ?? null); setView('overview'); }}/>{calendarVisited && <AssignmentCalendar active={view === 'calendar'} data={data} academic={academic} requestedCourse={calendarCourse} onPlanLocal={planLocalAssignment} onOpenCourse={key => { if (key.startsWith('local:')) { const id = key.slice(6); setCourseId(id); setSemesterId(academic.courses.find(c => c.id === id)?.semesterId ?? null); setView('overview'); } else { setRequestedClass(key.slice(10)); setView('classes'); } }} onOpenLocalAssignment={id => { const linked = items.find(i => i.task.id === id); if (linked) { setCourseId(linked.course.id); setSemesterId(linked.course.semesterId); setTab('assignments'); setView('overview'); } }}/>} {body}
+    <BlockDialog draft={blockDraft} setDraft={setBlockDraft} courses={blockCourses} academic={academic} tasks={data.tasks} sourceContext={blockSourceContext} error={formError} onClose={close} onSave={d => { const { isNew, ...input } = d; void isNew; void submit(() => ops.saveBlock(input)); }}/>
     <GoalDialog key={goalCourse?.id ?? 'none'} course={goalCourse} goal={goalCourse ? study.goals.filter(g => g.courseId === goalCourse.id && g.effectiveWeek <= week).sort((a, b) => b.effectiveWeek.localeCompare(a.effectiveWeek))[0] ?? null : null} week={week} error={formError} onClose={close} onSave={g => void submit(() => ops.saveGoal(g))}/>
     <Modal open={Boolean(semDraft)} title={semDraft && academic.semesters.some(s => s.id === semDraft.id) ? 'Edit semester' : 'New semester'} onClose={close}>{semDraft && (() => {
       const dateError = semDraft.startDate && semDraft.endDate ? validateSemesterDates(semDraft.startDate, semDraft.endDate) : '';

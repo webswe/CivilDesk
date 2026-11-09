@@ -9,7 +9,7 @@ import type { WorkspaceData } from './services/workspace';
 import './assignment-calendar.css';
 
 type View = 'month' | 'week' | 'upcoming';
-interface Props { data: WorkspaceData; academic: AcademicData; active: boolean; requestedCourse: string | null; onOpenCourse: (key: string) => void; onOpenLocalAssignment: (taskId: string) => void }
+interface Props { data: WorkspaceData; academic: AcademicData; active: boolean; requestedCourse: string | null; onOpenCourse: (key: string) => void; onOpenLocalAssignment: (taskId: string) => void; onPlanLocal: (item: CalendarAssignment) => void }
 const today = () => localDate(new Date());
 const palette = ['#c58d9b', '#a98bd0', '#7aa7d2', '#74b8a2', '#cdb078', '#cf8b7a'];
 const courseColor = (key: string) => palette[[...key].reduce((hash, char) => (hash * 31 + char.charCodeAt(0)) >>> 0, 0) % palette.length]!;
@@ -20,13 +20,17 @@ const deadlineLabel = (item: CalendarAssignment) => {
   return `${due.date}${due.time ? ` at ${due.time}` : ' · date only'}${due.zone === 'unverified' ? ' · timezone unverified' : due.zone === 'offset' ? ' · source offset supplied' : ''}`;
 };
 
-export function AssignmentCalendar({ data, academic, active, requestedCourse, onOpenCourse, onOpenLocalAssignment }: Props) {
+export function AssignmentCalendar({ data, academic, active, requestedCourse, onOpenCourse, onOpenLocalAssignment, onPlanLocal }: Props) {
   const [snapshot, setSnapshot] = useState<AssignmentSnapshot | null>(null);
   const [mode, setMode] = useState<BrightspaceCourseMode | null>(null);
   const [view, setView] = useState<View>('month');
   const [cursor, setCursor] = useState(today);
   const [selectedDay, setSelectedDay] = useState(today);
   const [selectedItem, setSelectedItem] = useState<string | null>(null);
+  const [previewKey, setPreviewKey] = useState<string | null>(null);
+  const [previewDate, setPreviewDate] = useState('');
+  const [previewTime, setPreviewTime] = useState('');
+  const [previewMinutes, setPreviewMinutes] = useState(45);
   const [selectedCourses, setSelectedCourses] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -42,6 +46,7 @@ export function AssignmentCalendar({ data, academic, active, requestedCourse, on
   ], [academic.courses, snapshot]);
   const days = view === 'week' ? weekDays(cursor) : monthDays(cursor);
   const chosen = all.find(item => item.key === selectedItem) ?? null;
+  const preview = chosen?.source === 'synthetic' && previewKey === chosen.key;
   const dayItems = visible.filter(item => item.deadline?.date === selectedDay);
   const unscheduled = visible.filter(item => !item.deadline);
   const upcoming = upcomingAssignments(visible, today());
@@ -66,6 +71,8 @@ export function AssignmentCalendar({ data, academic, active, requestedCourse, on
         {view === 'upcoming' ? <section><h3>Upcoming assignments</h3>{upcoming.length ? <div className="assignment-list">{upcoming.map(card)}</div> : <p className="classes-empty">No upcoming dated assignments in the available results. Source lists may be incomplete.</p>}</section> : <><div className={`assignment-days ${view}`}><div className="assignment-weekdays">{['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => <span key={d}>{d}</span>)}</div><div className="assignment-cells">{days.map(day => { const items = visible.filter(item => item.deadline?.date === day); return <button key={day} className={`assignment-day ${day === selectedDay ? 'selected' : ''} ${view === 'month' && day.slice(0, 7) !== cursor.slice(0, 7) ? 'other-month' : ''}`} onClick={() => setSelectedDay(day)} aria-label={`${day}; ${items.length} assignments`}><strong>{day.slice(8)}</strong>{items.slice(0, view === 'week' ? 5 : 2).map(item => <span className={`assignment-chip ${item.source}`} style={{ background: `color-mix(in srgb, ${courseColor(item.courseKey)} 45%, #30252d)` }} key={item.key}>{item.title}</span>)}{items.length > (view === 'week' ? 5 : 2) && <small>+{items.length - (view === 'week' ? 5 : 2)} more</small>}</button>; })}</div></div><section><h3>{selectedDay}</h3>{dayItems.length ? <div className="assignment-list">{dayItems.map(card)}</div> : <p className="classes-empty">No assignments with a recognized deadline on this day.</p>}</section></>}
         <section><h3>Unscheduled</h3><p className="assignment-note">No positively recognized due date was supplied for these assignments.</p>{unscheduled.length ? <div className="assignment-list">{unscheduled.map(card)}</div> : <p className="classes-empty">No unscheduled assignments in the available results.</p>}</section>
       </div></div>
-    {chosen && <div className="assignment-detail" role="dialog" aria-label="Assignment details"><button className="text-link" onClick={() => setSelectedItem(null)}><ChevronLeft size={15}/> Back to calendar</button><h3>{chosen.title}</h3><p>{chosen.courseName} · {chosen.courseCode || 'Code unavailable'}</p><dl><dt>Source</dt><dd>{sourceLabel(chosen)}</dd><dt>Due</dt><dd>{deadlineLabel(chosen)}</dd>{chosen.status && <><dt>Status shown by source</dt><dd>{chosen.status}</dd></>}{chosen.description && <><dt>Description</dt><dd>{chosen.description}</dd></>}</dl><div className="button-row"><button className="soft-button" onClick={() => { onOpenCourse(chosen.courseKey); setSelectedItem(null); }}>Open class</button>{chosen.taskId && <button className="soft-button" onClick={() => onOpenLocalAssignment(chosen.taskId!)}>Open local assignment</button>}</div></div>}
+    {chosen && <div className="assignment-detail" role="dialog" aria-label="Assignment details"><button className="text-link" onClick={() => { setSelectedItem(null); setPreviewKey(null); }}><ChevronLeft size={15}/> Back to calendar</button><h3>{chosen.title}</h3><p>{chosen.courseName} · {chosen.courseCode || 'Code unavailable'}</p><dl><dt>Source</dt><dd>{sourceLabel(chosen)}</dd><dt>Due</dt><dd>{deadlineLabel(chosen)}</dd>{chosen.status && <><dt>Status shown by source</dt><dd>{chosen.status}</dd></>}{chosen.description && <><dt>Description</dt><dd>{chosen.description}</dd></>}</dl><div className="button-row"><button className="soft-button" onClick={() => { onOpenCourse(chosen.courseKey); setSelectedItem(null); }}>Open class</button>{chosen.taskId && <button className="soft-button" onClick={() => onOpenLocalAssignment(chosen.taskId!)}>Open local assignment</button>}<button className="primary-button" onClick={() => { if (chosen.source === 'local') onPlanLocal(chosen); else { setPreviewKey(chosen.key); setPreviewDate(''); setPreviewTime(''); setPreviewMinutes(45); } }}>Plan Study Session</button></div>
+      {preview && <section className="assignment-plan-preview" aria-label="Synthetic study planning preview"><h4>Study planning preview</h4><p>This is a fictional Brightspace assignment. Its portal, course, and assignment identity remain in this in-memory preview. No study block or coursework is saved.</p><p><strong>{chosen.courseCode || chosen.courseName}</strong> · {chosen.title}</p><p>Assignment due: {deadlineLabel(chosen)}. Choose a separate local study time.</p><div className="assignment-plan-fields"><label>Study date<input type="date" value={previewDate} onChange={e => setPreviewDate(e.target.value)}/></label><label>Study time<input type="time" value={previewTime} onChange={e => setPreviewTime(e.target.value)}/></label><label>Duration in minutes<input type="number" min={5} max={480} step={5} value={previewMinutes} onChange={e => setPreviewMinutes(Number(e.target.value))}/></label></div>{previewDate && previewTime && previewMinutes >= 5 && previewMinutes <= 480 && <p role="status">Preview: {previewDate} at {previewTime} for {previewMinutes} minutes. No session will be created.</p>}<button className="soft-button" onClick={() => setPreviewKey(null)}>Close preview</button></section>}
+    </div>}
   </section>;
 }

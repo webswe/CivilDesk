@@ -11,14 +11,15 @@ import type { Task } from './services/workspace';
 const dayText = (date: string, now: Date) => relativeDay(date, now);
 const taskTitle = (tasks: Task[], id: string | null) => (id ? tasks.find(t => t.id === id)?.title ?? '' : '');
 
-export function BlockDialog({ draft, setDraft, courses, academic, tasks, error, onSave, onClose }: {
-  draft: BlockDraft | null; setDraft: (d: BlockDraft | null) => void; courses: Course[]; academic: AcademicData; tasks: Task[]; error: string; onSave: (d: BlockDraft) => void; onClose: () => void;
+export function BlockDialog({ draft, setDraft, courses, academic, tasks, sourceContext, error, onSave, onClose }: {
+  draft: BlockDraft | null; setDraft: (d: BlockDraft | null) => void; courses: Course[]; academic: AcademicData; tasks: Task[]; sourceContext?: string; error: string; onSave: (d: BlockDraft) => void; onClose: () => void;
 }) {
   const related = draft ? academic.work.filter(w => w.courseId === draft.courseId).map(w => ({ link: w, task: tasks.find(t => t.id === w.taskId) })).filter(x => x.task && !x.task.completedAtMs || x.task?.id === draft.taskId) : [];
   const task = draft?.taskId ? tasks.find(t => t.id === draft.taskId) : undefined;
   const late = draft && task?.dueDate && draft.startDate > task.dueDate;
   return <Modal open={Boolean(draft)} title={draft?.isNew ? 'Schedule study' : 'Edit study block'} onClose={onClose}>{draft && <form onSubmit={e => { e.preventDefault(); onSave(draft); }}>
     <h2>{draft.isNew ? 'Schedule study' : 'Edit study block'}</h2>
+    {sourceContext && <p className="time-zone-note">{sourceContext}</p>}
     <div className="form-grid">
       <label>Course<select value={draft.courseId} onChange={e => setDraft({ ...draft, courseId: e.target.value, taskId: null })}>{courses.map(c => <option key={c.id} value={c.id}>{c.code} · {c.name}</option>)}</select></label>
       <label>For coursework (optional)<select value={draft.taskId ?? ''} onChange={e => setDraft({ ...draft, taskId: e.target.value || null })}><option value="">General study</option>{related.map(x => <option key={x.task!.id} value={x.task!.id}>{workTypeLabels[x.link.workType]} · {x.task!.title}{x.task!.dueDate ? ' (due ' + x.task!.dueDate + ')' : ''}</option>)}</select></label>

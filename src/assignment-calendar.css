@@ -30,5 +30,11 @@
 .assignment-detail h3 { margin: 12px 0 4px; font-size: 21px; overflow-wrap: anywhere; }
 .assignment-detail dl { display: grid; grid-template-columns: 130px minmax(0,1fr); gap: 8px; font-size: 12px; overflow-wrap: anywhere; }
 .assignment-detail dt { color: #c5a8b8; }.assignment-detail dd { margin: 0; }
+.assignment-plan-preview { margin-top: 18px; padding: 14px; border: 1px solid #705663; border-radius: 10px; background: #30252d; overflow-wrap: anywhere; }
+.assignment-plan-preview h4 { margin: 0 0 8px; font-size: 16px; }
+.assignment-plan-preview p { color: #ddcbd4; font-size: 12px; line-height: 1.5; }
+.assignment-plan-fields { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; margin: 12px 0; }
+.assignment-plan-fields label { display: grid; gap: 5px; min-width: 0; font-size: 12px; }
+.assignment-plan-fields input { min-width: 0; width: 100%; box-sizing: border-box; }
 @media(max-width:900px) { .assignment-layout { grid-template-columns: 1fr; } .assignment-filters { display: flex; flex-wrap: wrap; gap: 8px 14px; } .assignment-filters h3 { width: 100%; } .assignment-filters label { max-width: 220px; } }
-@media(max-width:650px) { .assignment-calendar { padding: 14px; } .assignment-day { min-height: 50px; } .assignment-chip { display: none; } .assignment-detail dl { grid-template-columns: 1fr; } }
+@media(max-width:650px) { .assignment-calendar { padding: 14px; } .assignment-day { min-height: 50px; } .assignment-chip { display: none; } .assignment-detail dl,.assignment-plan-fields { grid-template-columns: 1fr; } }

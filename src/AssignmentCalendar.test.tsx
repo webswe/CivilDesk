@@ -16,7 +16,8 @@ const sample: service.AssignmentSnapshot = { portalOrigin: 'https://synthetic.ex
 ] };
 const academic: AcademicData = { semesters: [], courses: [{ id: 'local-1', semesterId: 's', code: 'LOCAL 1', name: 'Local class', instructor: '', description: '', meetingSchedule: '', location: '', color: '#7aa7d2', archived: false, createdAtMs: 1, updatedAtMs: 1 }], work: [{ taskId: 'task-1', courseId: 'local-1', workType: 'assignment', referenceNotes: '' }] };
 const data = { tasks: [{ id: 'task-1', title: 'Local paper', dueDate: '2027-01-02', dueTime: null, description: '', completedAtMs: null }] } as WorkspaceData;
-const renderCalendar = () => render(<AssignmentCalendar active data={data} academic={academic} requestedCourse={null} onOpenCourse={vi.fn()} onOpenLocalAssignment={vi.fn()}/>);
+const planLocal = vi.fn();
+const renderCalendar = (workspace = data) => render(<AssignmentCalendar active data={workspace} academic={academic} requestedCourse={null} onOpenCourse={vi.fn()} onOpenLocalAssignment={vi.fn()} onPlanLocal={planLocal}/>);
 beforeEach(() => { vi.resetAllMocks(); mode.mockResolvedValue('synthetic_cli'); Object.defineProperty(navigator, 'onLine', { configurable: true, value: true }); });
 afterEach(cleanup);
 
@@ -64,4 +65,41 @@ it('retains stale sample after failure and keeps local work offline', async () =
   Object.defineProperty(navigator, 'onLine', { configurable: true, value: false }); fireEvent.offline(window);
   expect(screen.getByRole('button', { name: 'Refresh sample' })).toBeDisabled();
   expect(screen.getByText('Local paper')).toBeInTheDocument();
+});
+
+it('hands off the authoritative local assignment only after the action is chosen', () => {
+  renderCalendar();
+  fireEvent.click(screen.getByRole('button', { name: 'Upcoming' }));
+  fireEvent.click(screen.getByRole('button', { name: /Local paper/ }));
+  expect(planLocal).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Plan Study Session' }));
+  expect(planLocal).toHaveBeenCalledWith(expect.objectContaining({ source: 'local', taskId: 'task-1', courseKey: 'local:local-1' }));
+});
+
+it('keeps a long local assignment title tied to its task ID', () => {
+  const longTitle = 'A detailed fictional structures assignment with an unusually long title that wraps in a narrow study planning window';
+  renderCalendar({ ...data, tasks: [{ ...data.tasks[0]!, title: longTitle }] });
+  fireEvent.click(screen.getByRole('button', { name: 'Upcoming' }));
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(longTitle) }));
+  expect(screen.getByRole('dialog', { name: 'Assignment details' })).toHaveTextContent(longTitle);
+  fireEvent.click(screen.getByRole('button', { name: 'Plan Study Session' }));
+  expect(planLocal).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'task-1', title: longTitle }));
+});
+
+it('keeps synthetic planning in memory and does not hand it to the local study writer', async () => {
+  load.mockResolvedValue(sample);
+  renderCalendar();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh sample' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh sample' }));
+  await screen.findByText(/source page may be truncated/i);
+  const unscheduled = screen.getByRole('heading', { name: 'Unscheduled' }).parentElement!;
+  fireEvent.click(within(unscheduled).getByRole('button', { name: /Reflection/ }));
+  fireEvent.click(screen.getByRole('button', { name: 'Plan Study Session' }));
+  expect(screen.getByRole('region', { name: 'Synthetic study planning preview' })).toHaveTextContent('No study block or coursework is saved');
+  fireEvent.change(screen.getByLabelText('Study date'), { target: { value: '2027-01-03' } });
+  fireEvent.change(screen.getByLabelText('Study time'), { target: { value: '18:30' } });
+  expect(within(screen.getByRole('region', { name: 'Synthetic study planning preview' })).getByRole('status')).toHaveTextContent('Preview: 2027-01-03 at 18:30');
+  expect(planLocal).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Close preview' }));
+  expect(screen.queryByRole('region', { name: 'Synthetic study planning preview' })).toBeNull();
 });
