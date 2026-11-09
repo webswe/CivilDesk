@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { $, $$, browser, expect } from '@wdio/globals';
-import { go, onboard, restartApp } from '../lib/app.mjs';
+import { dialogButton, field, go, localDate, onboard, restartApp, setField } from '../lib/app.mjs';
 import { e2eDataPaths } from '../lib/guard.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -154,5 +154,95 @@ describe('Brightspace connection foundation (synthetic executable only)', () => 
     await expect($$('.classes-card')).toBeElementsArrayOfSize(1);
     await $('.classes-card').click();
     await expect($('.classes-detail')).toHaveText(expect.stringContaining('Term unavailable'));
+  });
+
+  it('reads only synthetic assignments with source identity and completeness evidence', async () => {
+    scenario('assignments_partial');
+    const before = (await invoke('load_academic')).value;
+    const result = await invoke('brightspace_assignments');
+    expect(result.ok).toBe(true);
+    expect(result.value).toMatchObject({ portalOrigin: origin, mode: 'synthetic_cli', limitedCourseCount: false });
+    expect(result.value.results.map(r => r.courseId)).toEqual(['610101', '610202']);
+    expect(result.value.results[0].completeness.status).toBe('potentially_truncated');
+    expect(result.value.results[0].assignments.map(a => a.id)).toEqual(['801', '802', '803']);
+    expect(result.value.results[0].assignments[0].due_date).toBe('2026-11-18T17:00:00');
+    expect(result.value.results[1].assignments[0].id).toBe('801');
+    expect((await invoke('load_academic')).value).toEqual(before);
+  });
+
+  it('keeps individual course failures visible and bounds assignment subprocesses', async () => {
+    scenario('assignments_many_courses');
+    const bounded = (await invoke('brightspace_assignments')).value;
+    expect(bounded.limitedCourseCount).toBe(true);
+    expect(bounded.courses).toHaveLength(12);
+    expect(bounded.results).toHaveLength(12);
+    scenario('assignments_partial_failure');
+    const partial = (await invoke('brightspace_assignments')).value;
+    expect(partial.results[0].assignments).toHaveLength(3);
+    expect(partial.results[1].error).toBeTruthy();
+    for (const value of ['assignments_invalid_json', 'assignments_malformed', 'assignments_oversized', 'assignments_timeout']) {
+      scenario(value);
+      const result = (await invoke('brightspace_assignments')).value;
+      expect(result.results.every(r => r.error && r.assignments.length === 0)).toBe(true);
+    }
+    scenario('assignments_timeout');
+    const cancelled = await browser.executeAsync(done => {
+      const pending = window.__TAURI_INTERNALS__.invoke('brightspace_assignments');
+      setTimeout(() => { void window.__TAURI_INTERNALS__.invoke('brightspace_cancel'); }, 300);
+      pending.then(value => done({ value }), reason => done({ message: String(reason) }));
+    });
+    expect(cancelled.message).toContain('cancelled');
+  });
+
+  it('navigates the Assignment Calendar with filters, details, and unscheduled work', async () => {
+    scenario('assignments_partial'); await go('School'); await $('button=Assignment Calendar').click();
+    await expect($('.assignment-calendar')).toBeDisplayed();
+    await $('.assignment-calendar').$('button=Refresh sample').waitForEnabled();
+    await $('.assignment-calendar').$('button=Refresh sample').click();
+    await expect($('.assignment-warning')).toHaveText(expect.stringContaining('may be truncated'));
+    await $('button=Upcoming').click();
+    await expect($$('.assignment-card.synthetic')).toBeElementsArrayOfSize(4);
+    await $('button=Month').click();
+    await expect($('.assignment-day[aria-label^="2026-11-18"]')).toHaveAttribute('aria-label', expect.stringContaining('3 assignments'));
+    await $('.assignment-day[aria-label^="2026-11-18"]').click();
+    await expect($$('.assignment-main section:first-of-type .assignment-card.synthetic')).toBeElementsArrayOfSize(3);
+    await $('button=Week').click();
+    await expect($('.assignment-days.week')).toBeDisplayed();
+    await $('button=Upcoming').click();
+    await $('.assignment-filters label:nth-of-type(1) input').click();
+    await expect($$('.assignment-card.synthetic')).toBeElementsArrayOfSize(3);
+    await $('.assignment-main section:last-child .assignment-card').click();
+    await expect($('.assignment-detail')).toHaveText(expect.stringContaining('No recognized due date'));
+    await expect($('.assignment-detail')).toHaveText(expect.stringContaining('Synthetic Brightspace'));
+    await $('button=Back to calendar').click();
+    await restartApp(); await go('School'); await $('button=Assignment Calendar').click();
+    await expect($('.assignment-status')).toHaveText(expect.stringContaining('Refresh to load synthetic'));
+  });
+
+  it('shows local coursework beside synthetic work without importing or merging it', async () => {
+    await $('button=New semester').click();
+    await field('Name').setValue('Fictional local term');
+    await setField(await field('Start date'), localDate(-30));
+    await setField(await field('End date'), localDate(90));
+    await dialogButton('Save semester').click();
+    await $('button=Add course').click();
+    await field('Course code').setValue('CIV 201');
+    await field('Course name').setValue('Structures and the Built Environment');
+    await dialogButton('Save course').click();
+    await $('button=Add coursework').click();
+    await field('Title').setValue('Design brief');
+    await setField(await field('Type', 'select'), 'assignment');
+    await setField(await field('Due date'), localDate(3));
+    await dialogButton('Save coursework').click();
+    await go('School'); await $('button=Assignment Calendar').click();
+    scenario('missing'); await $('.assignment-calendar').$('button=Refresh sample').click();
+    await expect($('.assignment-status')).toHaveText(expect.stringContaining('Sample retrieved'));
+    await $('button=Upcoming').click();
+    await expect($('.assignment-card.local')).toHaveText(expect.stringContaining('Design brief'));
+    await expect($$('.assignment-main section:first-of-type .assignment-card.synthetic')).toBeElementsArrayOfSize(3);
+    expect((await invoke('load_academic')).value.work).toHaveLength(1);
+    await restartApp(); await go('School'); await $('button=Assignment Calendar').click(); await $('button=Upcoming').click();
+    await expect($('.assignment-card.local')).toHaveText(expect.stringContaining('Design brief'));
+    await expect($$('.assignment-card.synthetic')).toBeElementsArrayOfSize(0);
   });
 });

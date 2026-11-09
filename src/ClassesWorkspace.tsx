@@ -8,9 +8,9 @@ const colors = ['#c58d9b', '#a98bd0', '#7aa7d2', '#74b8a2', '#cdb078', '#cf8b7a'
 const courseKey = (portal: string, id: string) => `${portal}\u0000${id}`;
 const display = (value: string, fallback: string) => value.trim() || fallback;
 
-interface Props { localCourses: Course[]; onOpenLocal: (id: string) => void; active: boolean }
+interface Props { localCourses: Course[]; onOpenLocal: (id: string) => void; onOpenCalendar?: (courseKey: string) => void; requestedCourse?: string | null; active: boolean }
 
-export function ClassesWorkspace({ localCourses, onOpenLocal, active }: Props) {
+export function ClassesWorkspace({ localCourses, onOpenLocal, onOpenCalendar, requestedCourse, active }: Props) {
   const [snapshot, setSnapshot] = useState<BrightspaceCourseSnapshot | null>(null);
   const [mode, setMode] = useState<BrightspaceCourseMode | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -18,6 +18,13 @@ export function ClassesWorkspace({ localCourses, onOpenLocal, active }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [offline, setOffline] = useState(() => !navigator.onLine);
+  useEffect(() => { if (requestedCourse) setSelected(requestedCourse); }, [requestedCourse]);
+  useEffect(() => {
+    if (!requestedCourse || snapshot || !mode || mode === 'unavailable' || offline) return;
+    let mounted = true;
+    void brightspaceCourses().then(value => { if (mounted) setSnapshot(value); }).catch(() => { if (mounted) setError('The selected sample class could not be loaded.'); });
+    return () => { mounted = false; };
+  }, [requestedCourse, snapshot, mode, offline]);
   useEffect(() => { const update = () => setOffline(!navigator.onLine); window.addEventListener('online', update); window.addEventListener('offline', update); return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); }; }, []);
   useEffect(() => { let active = true; void brightspaceCourseMode().then(value => { if (active) setMode(value); }).catch(() => { if (active) setMode('unavailable'); }); return () => { active = false; }; }, []);
   const courses = useMemo(() => snapshot?.courses ?? [], [snapshot]);
@@ -39,7 +46,7 @@ export function ClassesWorkspace({ localCourses, onOpenLocal, active }: Props) {
     } finally { setBusy(false); }
   };
   return <section className="classes-workspace" hidden={!active} aria-label="Classes workspace">
-    {current && snapshot ? <ClassDetail course={current} portal={snapshot.portalOrigin} mode={snapshot.mode} onBack={() => setSelected(null)}/> : <>
+    {current && snapshot ? <ClassDetail course={current} portal={snapshot.portalOrigin} mode={snapshot.mode} onBack={() => setSelected(null)} onOpenCalendar={onOpenCalendar}/> : <>
       <div className="classes-title"><div><span className="classes-eyebrow">SCHOOL / CLASSES</span><h2>Classes</h2><p>Browse your local courses and, when enabled, a clearly labeled synthetic Brightspace catalog.</p></div><div className="classes-actions">{mode !== 'unavailable' && <button className="soft-button" onClick={() => void refresh()} disabled={busy || offline || !mode}><RefreshCw size={15}/> {busy ? 'Refreshing…' : 'Refresh sample'}</button>}{busy && <button className="soft-button" onClick={() => void brightspaceCancel()}><X size={14}/> Cancel</button>}</div></div>
       <div className="classes-status" role="status">{offline ? 'Offline · showing only available in-memory information.' : mode === 'unavailable' ? 'Brightspace course retrieval is unavailable in this build.' : !mode ? 'Checking sample availability…' : busy ? 'Loading sample courses…' : error && snapshot ? 'Refresh failed · showing the last successful sample.' : snapshot ? `Sample retrieved ${new Date(snapshot.retrievedAtMs).toLocaleString()} · ${snapshot.complete ? 'complete result' : 'incomplete result'}` : 'Sample courses are not loaded. Refresh when ready.'}</div>
       {error && <p className="classes-error" role="alert">{error}</p>}
@@ -52,6 +59,6 @@ export function ClassesWorkspace({ localCourses, onOpenLocal, active }: Props) {
   </section>;
 }
 
-function ClassDetail({ course, portal, mode, onBack }: { course: BrightspaceCourse; portal: string; mode: BrightspaceCourseSnapshot['mode']; onBack: () => void }) {
-  return <article className="classes-detail"><button className="text-link" onClick={onBack}><ChevronLeft size={15}/> Back to Classes</button><span className="classes-eyebrow">SYNTHETIC BRIGHTSPACE CLASS</span><h2>{display(course.name, 'Untitled course')}</h2><p className="classes-detail-code">{display(course.code, 'Code unavailable')} · {display(course.semester_name, 'Term unavailable')}</p><div className="classes-detail-meta"><div><span>Source</span><strong>{mode === 'demo' ? 'CivilDesk sample catalog' : 'Synthetic D2L-CLI fixture'}</strong></div><div><span>Course ID</span><strong>{course.id}</strong></div><div><span>Portal provenance</span><strong>{portal} (synthetic)</strong></div><div><span>Access flag</span><strong>{course.can_access ? 'Available in sample' : 'Unavailable in sample'}</strong></div><div><span>Source status</span><strong>{course.is_active ? 'Active' : 'Inactive'}</strong></div>{course.is_new_enrollment && <div><span>Enrollment</span><strong>New enrollment</strong></div>}{course.start_date && <div><span>Source start date</span><strong>{course.start_date}</strong></div>}{course.end_date && <div><span>Source end date</span><strong>{course.end_date}</strong></div>}</div><section className="classes-coming"><h3>Academic information</h3><p>Assignments, grades, announcements, and course-linked study sessions are unavailable for synthetic Brightspace classes in this phase. Nothing here is imported into your local School records.</p></section></article>;
+function ClassDetail({ course, portal, mode, onBack, onOpenCalendar }: { course: BrightspaceCourse; portal: string; mode: BrightspaceCourseSnapshot['mode']; onBack: () => void; onOpenCalendar?: (courseKey: string) => void }) {
+  return <article className="classes-detail"><button className="text-link" onClick={onBack}><ChevronLeft size={15}/> Back to Classes</button><span className="classes-eyebrow">SYNTHETIC BRIGHTSPACE CLASS</span><h2>{display(course.name, 'Untitled course')}</h2><p className="classes-detail-code">{display(course.code, 'Code unavailable')} · {display(course.semester_name, 'Term unavailable')}</p>{onOpenCalendar && <button className="soft-button" onClick={() => onOpenCalendar(`synthetic:${portal}\u0000${course.id}`)}>View assignments in calendar</button>}<div className="classes-detail-meta"><div><span>Source</span><strong>{mode === 'demo' ? 'CivilDesk sample catalog' : 'Synthetic D2L-CLI fixture'}</strong></div><div><span>Course ID</span><strong>{course.id}</strong></div><div><span>Portal provenance</span><strong>{portal} (synthetic)</strong></div><div><span>Access flag</span><strong>{course.can_access ? 'Available in sample' : 'Unavailable in sample'}</strong></div><div><span>Source status</span><strong>{course.is_active ? 'Active' : 'Inactive'}</strong></div>{course.is_new_enrollment && <div><span>Enrollment</span><strong>New enrollment</strong></div>}{course.start_date && <div><span>Source start date</span><strong>{course.start_date}</strong></div>}{course.end_date && <div><span>Source end date</span><strong>{course.end_date}</strong></div>}</div><section className="classes-coming"><h3>Academic information</h3><p>Assignments, grades, announcements, and course-linked study sessions are unavailable for synthetic Brightspace classes in this phase. Nothing here is imported into your local School records.</p></section></article>;
 }
