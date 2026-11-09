@@ -63,7 +63,7 @@ describe('Brightspace connection foundation (synthetic executable only)', () => 
   it('separates portal mismatch and credential error without exposing fixture data', async () => {
     scenario('mismatch'); expect((await inspect()).state).toBe('portal_mismatch');
     scenario('credential_error'); expect((await inspect()).state).toBe('credential_error');
-    scenario('invalid_config'); expect((await inspect()).state).toBe('not_configured');
+    scenario('invalid_config'); expect((await inspect()).state).toBe('cli_incompatible');
   });
 
   it('rejects unsupported, malformed, and unexpected capability contracts', async () => {

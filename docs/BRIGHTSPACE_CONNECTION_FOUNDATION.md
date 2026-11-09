@@ -1,4 +1,4 @@
-# Brightspace connection foundation (Phase 6A.2)
+# Brightspace connection foundation (Phase 6A.3 security readiness)
 
 CivilDesk integrates with the **D2L-CLI authentication contract v1** implemented
 at D2L-CLI commit `17cf683`. Settings → Integrations → Brightspace stores a
@@ -29,7 +29,8 @@ The first response must have contract version `1` and capabilities
 `read_overview`, and `get_only_requests`. Discovery rejects unknown JSON keys,
 missing capabilities, malformed output, and unsupported versions. Status rejects
 unknown keys, wrong types, a profile or origin mismatch, unsupported state
-combinations, and any claim of live authentication. CLI messages and stderr
+combinations, a claim that CivilDesk's supplied profile or portal is missing,
+and any claim of live authentication. CLI messages and stderr
 are never forwarded to React. An older CLI is reported as incompatible.
 
 The subprocess receives a small allowlist of Windows operating-system
@@ -44,6 +45,15 @@ after the bounded process completes. A saved executable fingerprint is checked
 again immediately before each launch. A file replacement between that check
 and Windows process creation remains a narrow local same-user race; the adapter
 does not claim to contain malicious processes with the same Windows privileges.
+The hash detects changes to the selected file; it does not establish its
+publisher or make an untrusted file safe. Choose and keep `d2l.exe` in a
+directory where untrusted software cannot replace it, review updates before
+re-saving its fingerprint, and avoid shared writable or temporary directories.
+Closing the remaining launch race would require binding verification to the
+actual process image or launching suspended into a Job Object before resuming;
+those are separate Windows process-control changes, not a code-signing
+requirement. A same-user adversary can also alter CivilDesk settings or the CLI
+credential store, outside this adapter's protection boundary.
 
 ## App identity and configuration
 
@@ -88,6 +98,10 @@ cannot prove server acceptance, identify the Brightspace account, or distinguish
 session expiration from permission denial. A future approved live verification
 contract is required before claiming an active connection.
 
+CivilDesk's own `not_configured` state means no saved settings. Because the
+adapter supplies a validated profile and portal to the CLI, a CLI response
+claiming either selector is missing or invalid is treated as incompatible.
+
 ## Synthetic verification
 
 The native E2E workflow builds `brightspace-synthetic.exe` separately and
@@ -101,7 +115,19 @@ runtime guards compare the canonical fixture path and portal before spawning.
 The existing isolated SQLite database, WebView profile, reset safeguards, and
 Notion mock remain in place.
 
-Real-account sign-in, live verification, School Overview, Classes, Assignment
-Calendar, Study Planner, and academic retrieval require separate approval.
+Before real-account testing, the owner must approve an institution portal and
+account, review the installed CLI binary and its location, decide how its v2
+credential will be created, and use a non-E2E CivilDesk identity. The
+Brightspace adapter did not authenticate an account, inspect a Brightspace
+credential, or contact Brightspace during this review.
+
+Before Phase 6B read-only retrieval, define the approved course and assignment
+API contract, validate response shapes and origin binding, bound pagination and
+timeouts, sanitize errors, and keep retrieval behind the same fixed profile and
+executable checks. Live account acceptance remains unproven and must not be
+inferred from a stored credential. Real-account sign-in, live verification,
+School Overview, Classes, Assignment Calendar, Study Planner, and academic
+retrieval require separate owner authorization.
+
 The eventual Assignment Calendar must use class filters and due dates without
 creating duplicate global Calendar events.

@@ -578,18 +578,8 @@ fn parse_status(output: &Output, profile: &str, origin: &str) -> Result<&'static
     {
         return Err(());
     }
-    if v.state == "not_configured"
-        && output.exit_code == 1
-        && !v.configuration_valid
-        && v.credential_present.is_none()
-        && v.verification == "none"
-        && matches!(
-            v.error_code.as_deref(),
-            Some("missing_profile" | "invalid_profile" | "missing_portal" | "invalid_portal")
-        )
-    {
-        return Ok("not_configured");
-    }
+    // Both selectors were validated and supplied by this adapter. A CLI that
+    // claims either is missing or invalid has not honored the child contract.
     if v.profile_id.as_deref() != Some(profile)
         || v.portal_origin.as_deref() != Some(origin)
         || !v.configuration_valid
@@ -946,6 +936,13 @@ mod tests {
             )
             .unwrap();
         }
+        let missing_selector = response("not_configured", None, "none", Some("missing_portal"), 1);
+        assert!(parse_status(
+            &missing_selector,
+            "civildesk-dev",
+            "https://learn.example.edu"
+        )
+        .is_err());
     }
     #[cfg(not(feature = "notion-mock"))]
     #[test]
