@@ -30,3 +30,17 @@ export async function brightspaceCourses(): Promise<BrightspaceCourseSnapshot> {
   if (native()) return invoke('brightspace_courses');
   return { portalOrigin: 'https://synthetic.example.test', mode: 'demo', retrievedAtMs: Date.now(), complete: true, warnings: [], courses: [demo('610101', 'CIV 201', 'Structures and the Built Environment', 'Sample Fall Term'), demo('610202', 'MATH 240', 'Applied Mathematics for Designers', 'Sample Fall Term'), demo('610303', '', 'A Very Long Sample Course Title for Narrow Windows and Detail Navigation', '')] };
 }
+
+export interface BrightspaceAssignment { id: string; course_id: string; name: string; submission_status: string | null; score: string | null; due_date: string | null }
+export interface AssignmentCompleteness { status: 'below_page_size_boundary' | 'potentially_truncated' | 'unknown'; observed_row_count: number; page_size_ceiling: number | null }
+export interface AssignmentCourseResult { courseId: string; completeness: AssignmentCompleteness | null; error: string | null; assignments: BrightspaceAssignment[] }
+export interface AssignmentSnapshot { portalOrigin: string; mode: 'demo' | 'synthetic_cli'; retrievedAtMs: number; courses: BrightspaceCourse[]; results: AssignmentCourseResult[]; limitedCourseCount: boolean }
+/** Only the dedicated E2E identity may launch the synthetic CLI. Browser preview is hard-coded. */
+export async function brightspaceAssignments(): Promise<AssignmentSnapshot> {
+  if (native()) return invoke('brightspace_assignments');
+  const catalog = await brightspaceCourses();
+  const a = (course_id: string, id: string, name: string, due_date: string | null): BrightspaceAssignment => ({ course_id, id, name, due_date, submission_status: null, score: null });
+  const results = catalog.courses.map(course => { const assignments = course.id === '610101' ? [a(course.id, '801', 'Design brief', '2026-11-18T17:00:00'), a(course.id, '802', 'Studio reflection', null)] : course.id === '610202' ? [a(course.id, '801', 'Design brief', '2026-11-18T23:59:00')] : [];
+    return { courseId: course.id, completeness: { status: 'below_page_size_boundary' as const, observed_row_count: assignments.length, page_size_ceiling: 50 }, error: null, assignments }; });
+  return { portalOrigin: catalog.portalOrigin, mode: 'demo', retrievedAtMs: Date.now(), courses: catalog.courses, results, limitedCourseCount: false };
+}

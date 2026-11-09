@@ -79,6 +79,20 @@ async fn brightspace_courses(app: tauri::AppHandle) -> Result<brightspace::Cours
     .map_err(|_| "Brightspace courses could not be loaded.".to_string())?
 }
 
+#[tauri::command]
+async fn brightspace_assignments(
+    app: tauri::AppHandle,
+) -> Result<brightspace::AssignmentSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<RuntimeState>();
+        app.state::<BrightspaceState>()
+            .0
+            .assignments(db.database()?)
+    })
+    .await
+    .map_err(|_| "Brightspace assignments could not be loaded.".to_string())?
+}
+
 struct RuntimeState {
     database: Option<Database>,
     initialization_error: Option<String>,
@@ -935,7 +949,8 @@ pub fn run() {
             brightspace_inspect,
             brightspace_cancel,
             brightspace_course_mode,
-            brightspace_courses
+            brightspace_courses,
+            brightspace_assignments
         ])
         .run(tauri::generate_context!())
         .expect("CivilDesk could not start");

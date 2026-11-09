@@ -114,6 +114,20 @@ fn main() {
                 );
                 return;
             }
+            "assignments_many_courses" => {
+                let many: Vec<_> = (0..13)
+                    .map(|index| {
+                        course(
+                            &format!("{}", 610100 + index),
+                            &format!("CIV {}", index),
+                            &format!("Fictional course {}", index),
+                            "Sample term",
+                        )
+                    })
+                    .collect();
+                println!("{}", json!({"courses":many}));
+                return;
+            }
             _ => {
                 println!(
                     "{}",
@@ -122,6 +136,70 @@ fn main() {
                 return;
             }
         }
+    }
+    if args.len() == 6
+        && args[0] == "assignments"
+        && args[1] == "list"
+        && args[2] == "--course"
+        && args[4] == "--json"
+        && args[5] == "--include-completeness"
+        && (matches!(args[3].as_str(), "610101" | "610202")
+            || (scenario == "assignments_many_courses"
+                && args[3].bytes().all(|byte| byte.is_ascii_digit())))
+    {
+        let course_id = args[3].as_str();
+        if scenario == "assignments_timeout" {
+            std::thread::sleep(Duration::from_secs(30));
+        }
+        if scenario == "assignments_oversized" {
+            let _ = std::io::stdout().write_all(&vec![b'x'; 40_000]);
+            return;
+        }
+        if scenario == "assignments_invalid_json" {
+            println!("{{bad");
+            return;
+        }
+        if scenario == "assignments_failure"
+            || (scenario == "assignments_partial_failure" && course_id == "610202")
+        {
+            eprintln!("Synthetic assignment failure.");
+            std::process::exit(1);
+        }
+        let assignment = |id: &str, title: &str, due: Option<&str>| {
+            json!({
+                "id":id,"course_id":course_id,"name":title,"submission_status":null,"score":null,"due_date":due
+            })
+        };
+        let assignments = if scenario == "assignments_empty" {
+            vec![]
+        } else if scenario == "assignments_malformed" {
+            vec![json!({"id":"bad","course_id":course_id})]
+        } else if course_id == "610101" {
+            vec![
+                assignment("801", "Design brief", Some("2026-11-18T17:00:00")),
+                assignment("802", "Studio reflection", None),
+                assignment("803", "Research notes", Some("2026-11-18T09:00:00")),
+            ]
+        } else {
+            vec![assignment(
+                "801",
+                "Design brief",
+                Some("2026-11-18T23:59:00"),
+            )]
+        };
+        let status = if scenario == "assignments_partial" {
+            "potentially_truncated"
+        } else {
+            "below_page_size_boundary"
+        };
+        println!(
+            "{}",
+            json!({"assignments":assignments,"completeness":{
+                "status":status,"observed_row_count":assignments.len(),"page_size_ceiling":
+                if scenario == "assignments_partial" { assignments.len() } else { 50 }
+            }})
+        );
+        return;
     }
     if args.iter().map(String::as_str).collect::<Vec<_>>() != status {
         std::process::exit(8);

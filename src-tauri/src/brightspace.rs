@@ -84,6 +84,45 @@ pub struct CourseSnapshot {
     pub courses: Vec<BrightspaceCourse>,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrightspaceAssignment {
+    pub id: String,
+    pub course_id: String,
+    pub name: String,
+    pub submission_status: Option<String>,
+    pub score: Option<String>,
+    pub due_date: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssignmentCourseResult {
+    pub course_id: String,
+    pub completeness: Option<AssignmentCompleteness>,
+    pub error: Option<&'static str>,
+    pub assignments: Vec<BrightspaceAssignment>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssignmentSnapshot {
+    pub portal_origin: String,
+    pub mode: &'static str,
+    pub retrieved_at_ms: u64,
+    pub courses: Vec<BrightspaceCourse>,
+    pub results: Vec<AssignmentCourseResult>,
+    pub limited_course_count: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssignmentCompleteness {
+    pub status: String,
+    pub observed_row_count: usize,
+    pub page_size_ceiling: Option<usize>,
+}
+
 impl Inspection {
     fn new(
         state: &str,
@@ -230,6 +269,100 @@ impl Adapter {
             complete: true,
             warnings: vec![],
             courses,
+        })
+    }
+
+    pub fn assignments(&self, db: &Database) -> Result<AssignmentSnapshot, String> {
+        if self.course_mode() == "demo" {
+            return Ok(demo_assignments());
+        }
+        if self.course_mode() != "synthetic_cli" {
+            return Err("Brightspace assignment retrieval is unavailable in this build.".into());
+        }
+        // The caller supplies no course IDs. Every ID is obtained from the
+        // already restricted course listing in this same user-triggered read.
+        let catalog = self.courses(db)?;
+        let limited_course_count = catalog.courses.len() > 12;
+        let courses: Vec<_> = catalog.courses.into_iter().take(12).collect();
+        let _guard = self
+            .in_flight
+            .try_lock()
+            .map_err(|_| "A Brightspace check is already running.")?;
+        self.cancelled.store(false, Ordering::SeqCst);
+        let config = self
+            .load(db)?
+            .ok_or("Configure the synthetic Brightspace connection first.")?;
+        if config.portal_origin != catalog.portal_origin {
+            return Err("The synthetic portal changed during refresh.".into());
+        }
+        let canonical = PathBuf::from(&config.executable_path)
+            .canonicalize()
+            .map_err(|_| "The synthetic executable is unavailable.")?;
+        if !canonical.is_file()
+            || canonical.to_string_lossy() != config.executable_path
+            || self
+                .check_synthetic_boundary(&config.portal_origin, &canonical)
+                .is_err()
+            || file_sha256(&canonical).as_deref() != Ok(config.executable_sha256.as_str())
+        {
+            return Err("The synthetic executable is not trusted.".into());
+        }
+        let mut results = Vec::with_capacity(courses.len());
+        for course in &courses {
+            if self.cancelled.load(Ordering::SeqCst) {
+                return Err("Assignment refresh was cancelled.".into());
+            }
+            let args = [
+                "assignments",
+                "list",
+                "--course",
+                course.id.as_str(),
+                "--json",
+                "--include-completeness",
+            ];
+            let parsed = self
+                .run(
+                    &canonical,
+                    &config.executable_sha256,
+                    &config.portal_origin,
+                    &args,
+                )
+                .map_err(|kind| {
+                    if kind == "cancelled" {
+                        "Assignment refresh was cancelled."
+                    } else {
+                        "This course could not be read."
+                    }
+                })
+                .and_then(|output| {
+                    parse_assignments(&output, &course.id)
+                        .map_err(|_| "This course returned invalid assignment data.")
+                });
+            match parsed {
+                Ok(page) => results.push(AssignmentCourseResult {
+                    course_id: course.id.clone(),
+                    completeness: Some(page.completeness),
+                    error: None,
+                    assignments: page.assignments,
+                }),
+                Err(_) if self.cancelled.load(Ordering::SeqCst) => {
+                    return Err("Assignment refresh was cancelled.".into())
+                }
+                Err(message) => results.push(AssignmentCourseResult {
+                    course_id: course.id.clone(),
+                    completeness: None,
+                    error: Some(message),
+                    assignments: vec![],
+                }),
+            }
+        }
+        Ok(AssignmentSnapshot {
+            portal_origin: config.portal_origin,
+            mode: "synthetic_cli",
+            retrieved_at_ms: now_ms(),
+            courses,
+            results,
+            limited_course_count,
         })
     }
 
@@ -593,6 +726,59 @@ fn demo_courses() -> CourseSnapshot {
     ] }
 }
 
+fn demo_assignments() -> AssignmentSnapshot {
+    let catalog = demo_courses();
+    let make = |course: &BrightspaceCourse, id: &str, name: &str, due: Option<&str>| {
+        BrightspaceAssignment {
+            id: id.into(),
+            course_id: course.id.clone(),
+            name: name.into(),
+            submission_status: None,
+            score: None,
+            due_date: due.map(str::to_owned),
+        }
+    };
+    let results = catalog
+        .courses
+        .iter()
+        .map(|course| {
+            let assignments = if course.id == "610101" {
+                vec![
+                    make(course, "801", "Design brief", Some("2026-11-18T17:00:00")),
+                    make(course, "802", "Studio reflection", None),
+                ]
+            } else if course.id == "610202" {
+                vec![make(
+                    course,
+                    "801",
+                    "Design brief",
+                    Some("2026-11-18T23:59:00"),
+                )]
+            } else {
+                vec![]
+            };
+            AssignmentCourseResult {
+                course_id: course.id.clone(),
+                completeness: Some(AssignmentCompleteness {
+                    status: "below_page_size_boundary".into(),
+                    observed_row_count: assignments.len(),
+                    page_size_ceiling: Some(50),
+                }),
+                error: None,
+                assignments,
+            }
+        })
+        .collect();
+    AssignmentSnapshot {
+        portal_origin: catalog.portal_origin,
+        mode: "demo",
+        retrieved_at_ms: now_ms(),
+        courses: catalog.courses,
+        results,
+        limited_course_count: false,
+    }
+}
+
 fn process_message(kind: &str) -> &'static str {
     match kind {
         "cli_timeout" => "D2L-CLI did not respond in time.",
@@ -672,6 +858,118 @@ fn parse_courses(output: &Output) -> Result<Vec<BrightspaceCourse>, ()> {
         }
     }
     Ok(envelope.courses)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AssignmentEnvelope {
+    assignments: Vec<BrightspaceAssignment>,
+    completeness: AssignmentCompleteness,
+}
+
+fn valid_assignment_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 32 && id.bytes().all(|b| b.is_ascii_digit())
+}
+
+fn valid_naive_due(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if !value.is_ascii()
+        || bytes.len() < 19
+        || bytes.len() > 26
+        || bytes[10] != b'T'
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+    {
+        return false;
+    }
+    let date = &value[..10];
+    if !valid_calendar_date(date)
+        || ![11..13, 14..16, 17..19]
+            .iter()
+            .all(|range| value[range.clone()].bytes().all(|b| b.is_ascii_digit()))
+    {
+        return false;
+    }
+    let h: u8 = value[11..13].parse().unwrap_or(255);
+    let m: u8 = value[14..16].parse().unwrap_or(255);
+    let s: u8 = value[17..19].parse().unwrap_or(255);
+    h < 24
+        && m < 60
+        && s < 60
+        && (bytes.len() == 19 || (bytes[19] == b'.' && bytes[20..].iter().all(u8::is_ascii_digit)))
+}
+
+fn valid_calendar_date(value: &str) -> bool {
+    let b = value.as_bytes();
+    if b.len() != 10
+        || b[4] != b'-'
+        || b[7] != b'-'
+        || ![&b[0..4], &b[5..7], &b[8..10]]
+            .iter()
+            .all(|part| part.iter().all(u8::is_ascii_digit))
+    {
+        return false;
+    }
+    let y: u16 = value[0..4].parse().unwrap_or(0);
+    let m: usize = value[5..7].parse().unwrap_or(0);
+    let d: u8 = value[8..10].parse().unwrap_or(0);
+    if y == 0 || !(1..=12).contains(&m) {
+        return false;
+    }
+    let leap = y.is_multiple_of(4) && (!y.is_multiple_of(100) || y.is_multiple_of(400));
+    let days = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    d >= 1 && d <= days[m - 1]
+}
+
+fn parse_assignments(output: &Output, course_id: &str) -> Result<AssignmentEnvelope, ()> {
+    if output.exit_code != 0 || !valid_assignment_id(course_id) {
+        return Err(());
+    }
+    let page: AssignmentEnvelope = serde_json::from_slice(&output.stdout).map_err(|_| ())?;
+    if page.assignments.len() > 200
+        || page.completeness.observed_row_count > 1000
+        || ![
+            "below_page_size_boundary",
+            "potentially_truncated",
+            "unknown",
+        ]
+        .contains(&page.completeness.status.as_str())
+        || page
+            .completeness
+            .page_size_ceiling
+            .is_some_and(|n| n == 0 || n > 1000)
+        || page.completeness.observed_row_count < page.assignments.len()
+    {
+        return Err(());
+    }
+    let mut ids = std::collections::HashSet::new();
+    for a in &page.assignments {
+        if !valid_assignment_id(&a.id)
+            || a.course_id != course_id
+            || !ids.insert(a.id.as_str())
+            || a.name.trim().is_empty()
+            || a.name.len() > 400
+            || a.submission_status.as_ref().is_some_and(|s| s.len() > 300)
+            || a.score.as_ref().is_some_and(|s| s.len() > 300)
+            || a.due_date.as_ref().is_some_and(|s| !valid_naive_due(s))
+        {
+            return Err(());
+        }
+    }
+    Ok(page)
 }
 
 #[derive(Deserialize)]
@@ -1030,6 +1328,42 @@ mod tests {
         })
         .is_err());
     }
+    #[test]
+    fn assignment_contract_rejects_cross_course_identity_and_invalid_pages() {
+        let assignment = json!({"id":"801","course_id":"610101","name":"Fictional task","submission_status":null,"score":null,"due_date":"2027-03-14T02:30:00"});
+        let complete = json!({"status":"below_page_size_boundary","observed_row_count":1,"page_size_ceiling":50});
+        let output = |value: serde_json::Value, code| Output {
+            stdout: serde_json::to_vec(&value).unwrap(),
+            exit_code: code,
+        };
+        assert!(parse_assignments(
+            &output(
+                json!({"assignments":[assignment.clone()],"completeness":complete.clone()}),
+                0
+            ),
+            "610101"
+        )
+        .is_ok());
+        for page in [
+            json!({"assignments":[assignment.clone(),assignment.clone()],"completeness":complete.clone()}),
+            json!({"assignments":[assignment.clone()],"completeness":{"status":"complete","observed_row_count":1,"page_size_ceiling":50}}),
+            json!({"assignments":[assignment.clone()],"completeness":{"status":"unknown","observed_row_count":0,"page_size_ceiling":null}}),
+            json!({"assignments":[{"id":"801","course_id":"610202","name":"Wrong course","submission_status":null,"score":null,"due_date":null}],"completeness":complete.clone()}),
+            json!({"assignments":[{"id":"801","course_id":"610101","name":"Bad date","submission_status":null,"score":null,"due_date":"2027-02-29T10:00:00"}],"completeness":complete.clone()}),
+            json!({"assignments":[{"id":"801","course_id":"610101","name":"Offset unsupported by v1","submission_status":null,"score":null,"due_date":"2027-01-01T10:00:00Z"}],"completeness":complete.clone()}),
+            json!({"assignments":[assignment.clone()]}),
+        ] {
+            assert!(parse_assignments(&output(page, 0), "610101").is_err());
+        }
+        assert!(parse_assignments(
+            &output(json!({"assignments":[],"completeness":complete}), 1),
+            "610101"
+        )
+        .is_err());
+        assert!(!valid_assignment_id("610101;rm"));
+        assert!(valid_naive_due("2028-02-29T23:59:59"));
+        assert!(!valid_naive_due("2027-03-14"));
+    }
     #[cfg(not(feature = "notion-mock"))]
     #[test]
     fn regular_build_never_invokes_course_cli() {
@@ -1038,6 +1372,7 @@ mod tests {
             let adapter = Adapter::new(identity).unwrap();
             assert_eq!(adapter.course_mode(), "unavailable");
             assert!(adapter.courses(&db).is_err());
+            assert!(adapter.assignments(&db).is_err());
         }
     }
     #[test]
