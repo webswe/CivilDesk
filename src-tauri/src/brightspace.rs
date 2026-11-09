@@ -1,4 +1,4 @@
-//! Restricted, offline D2L-CLI v1 contract adapter. No academic reads or login.
+//! Restricted D2L-CLI adapter. Course reads are available only in the synthetic E2E build.
 use crate::persistence::Database;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const KEY: &str = "brightspace_connection_v1";
 const CONTRACT: u8 = 1;
@@ -56,6 +57,31 @@ pub struct Inspection {
     pub cli_compatible: bool,
     pub live_verified: bool,
     pub message: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrightspaceCourse {
+    pub id: String,
+    pub code: String,
+    pub name: String,
+    pub semester_name: String,
+    pub is_active: bool,
+    pub can_access: bool,
+    pub is_new_enrollment: bool,
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CourseSnapshot {
+    pub portal_origin: String,
+    pub mode: &'static str,
+    pub retrieved_at_ms: u64,
+    pub complete: bool,
+    pub warnings: Vec<String>,
+    pub courses: Vec<BrightspaceCourse>,
 }
 
 impl Inspection {
@@ -130,6 +156,81 @@ impl Adapter {
             portal_origin: c.portal_origin,
             executable_path: c.executable_path,
         }))
+    }
+
+    pub fn course_mode(&self) -> &'static str {
+        if self.identity == "com.webswe.civildesk.dev"
+            && cfg!(debug_assertions)
+            && !cfg!(feature = "notion-mock")
+        {
+            "demo"
+        } else if self.identity == "com.webswe.civildesk.e2e" && cfg!(feature = "notion-mock") {
+            "synthetic_cli"
+        } else {
+            "unavailable"
+        }
+    }
+
+    pub fn courses(&self, db: &Database) -> Result<CourseSnapshot, String> {
+        // This build gate is independent of the executable path and the parent
+        // environment. Regular builds cannot invoke a real academic read.
+        if self.course_mode() == "demo" {
+            return Ok(demo_courses());
+        }
+        if self.course_mode() != "synthetic_cli" {
+            return Err("Brightspace course retrieval is unavailable in this build.".into());
+        }
+        let _guard = self
+            .in_flight
+            .try_lock()
+            .map_err(|_| "A Brightspace check is already running.")?;
+        self.cancelled.store(false, Ordering::SeqCst);
+        let config = self
+            .load(db)?
+            .ok_or("Configure the synthetic Brightspace connection first.")?;
+        let path = PathBuf::from(&config.executable_path);
+        let canonical = path
+            .canonicalize()
+            .map_err(|_| "The synthetic executable is unavailable.")?;
+        if canonical != path
+            || !canonical.is_file()
+            || self
+                .check_synthetic_boundary(&config.portal_origin, &canonical)
+                .is_err()
+        {
+            return Err("The synthetic executable is not trusted.".into());
+        }
+        if file_sha256(&canonical).as_deref() != Ok(config.executable_sha256.as_str()) {
+            return Err("The synthetic executable changed. Review and save it again.".into());
+        }
+        let capability = self
+            .run(
+                &canonical,
+                &config.executable_sha256,
+                &config.portal_origin,
+                &["auth", "capabilities", "--json", "--contract-version", "1"],
+            )
+            .map_err(course_process_message)?;
+        parse_capabilities(&capability)
+            .map_err(|_| "The synthetic CLI contract is incompatible.")?;
+        let output = self
+            .run(
+                &canonical,
+                &config.executable_sha256,
+                &config.portal_origin,
+                &["courses", "list", "--json"],
+            )
+            .map_err(course_process_message)?;
+        let courses = parse_courses(&output)
+            .map_err(|_| "The synthetic CLI returned an invalid course list.")?;
+        Ok(CourseSnapshot {
+            portal_origin: config.portal_origin,
+            mode: "synthetic_cli",
+            retrieved_at_ms: now_ms(),
+            complete: true,
+            warnings: vec![],
+            courses,
+        })
     }
 
     pub fn save(
@@ -474,6 +575,24 @@ impl Adapter {
     }
 }
 
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}
+
+fn course_process_message(kind: &'static str) -> String {
+    process_message(kind).to_string()
+}
+
+fn demo_courses() -> CourseSnapshot {
+    CourseSnapshot { portal_origin: SYNTHETIC_ORIGIN.into(), mode: "demo", retrieved_at_ms: now_ms(), complete: true, warnings: vec![], courses: vec![
+        BrightspaceCourse { id: "610101".into(), code: "CIV 201".into(), name: "Structures and the Built Environment".into(), semester_name: "Sample Fall Term".into(), is_active: true, can_access: true, is_new_enrollment: false, start_date: None, end_date: None },
+        BrightspaceCourse { id: "610202".into(), code: "MATH 240".into(), name: "Applied Mathematics for Designers".into(), semester_name: "Sample Fall Term".into(), is_active: true, can_access: true, is_new_enrollment: false, start_date: None, end_date: None },
+        BrightspaceCourse { id: "610303".into(), code: "ENGR 310".into(), name: "A Long Sample Course Title for Narrow Window Layout Review and Course Detail Navigation".into(), semester_name: "".into(), is_active: false, can_access: true, is_new_enrollment: true, start_date: None, end_date: None },
+    ] }
+}
+
 fn process_message(kind: &str) -> &'static str {
     match kind {
         "cli_timeout" => "D2L-CLI did not respond in time.",
@@ -521,6 +640,38 @@ fn bounded_reader<R: Read + Send + 'static>(
 struct Output {
     stdout: Vec<u8>,
     exit_code: i32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CourseEnvelope {
+    courses: Vec<BrightspaceCourse>,
+}
+
+fn parse_courses(output: &Output) -> Result<Vec<BrightspaceCourse>, ()> {
+    if output.exit_code != 0 {
+        return Err(());
+    }
+    let envelope: CourseEnvelope = serde_json::from_slice(&output.stdout).map_err(|_| ())?;
+    if envelope.courses.len() > 200 {
+        return Err(());
+    }
+    let mut ids = std::collections::HashSet::new();
+    for c in &envelope.courses {
+        if c.id.is_empty()
+            || c.id.len() > 32
+            || !c.id.bytes().all(|b| b.is_ascii_digit())
+            || !ids.insert(c.id.as_str())
+            || c.code.len() > 160
+            || c.name.len() > 400
+            || c.semester_name.len() > 160
+            || c.start_date.as_ref().is_some_and(|s| s.len() > 100)
+            || c.end_date.as_ref().is_some_and(|s| s.len() > 100)
+        {
+            return Err(());
+        }
+    }
+    Ok(envelope.courses)
 }
 
 #[derive(Deserialize)]
@@ -816,6 +967,12 @@ mod tests {
                 Adapter::new("com.webswe.civildesk.e2e").unwrap().profile,
                 "civildesk-e2e-synthetic"
             );
+            assert_eq!(
+                Adapter::new("com.webswe.civildesk.e2e")
+                    .unwrap()
+                    .course_mode(),
+                "synthetic_cli"
+            );
         }
     }
     #[test]
@@ -843,6 +1000,45 @@ mod tests {
             exit_code: 2
         })
         .is_err());
+    }
+    #[test]
+    fn course_contract_requires_complete_unique_numeric_records() {
+        let course = json!({"id":"610101","code":"CIV 201","name":"Shared title","semester_name":"",
+            "is_active":true,"can_access":true,"is_new_enrollment":false,"start_date":null,"end_date":null});
+        let output = |value: serde_json::Value, code| Output {
+            stdout: serde_json::to_vec(&value).unwrap(),
+            exit_code: code,
+        };
+        assert_eq!(
+            parse_courses(&output(json!({"courses":[course.clone()]}), 0))
+                .unwrap()
+                .len(),
+            1
+        );
+        for value in [
+            json!({"courses":[course.clone(),course.clone()]}),
+            json!({"courses":[{"id":"bad"}]}),
+            json!({"courses":[{"id":"610101","code":"CIV 201"}]}),
+            json!({"courses":[course.clone()],"bookmark":"next"}),
+        ] {
+            assert!(parse_courses(&output(value, 0)).is_err());
+        }
+        assert!(parse_courses(&output(json!({"courses":[]}), 1)).is_err());
+        assert!(parse_courses(&Output {
+            stdout: b"{bad".to_vec(),
+            exit_code: 0
+        })
+        .is_err());
+    }
+    #[cfg(not(feature = "notion-mock"))]
+    #[test]
+    fn regular_build_never_invokes_course_cli() {
+        let db = Database(Mutex::new(Connection::open_in_memory().unwrap()));
+        for identity in ["com.webswe.civildesk", "com.webswe.civildesk.acceptance"] {
+            let adapter = Adapter::new(identity).unwrap();
+            assert_eq!(adapter.course_mode(), "unavailable");
+            assert!(adapter.courses(&db).is_err());
+        }
     }
     #[test]
     fn local_status_never_claims_live_authentication() {

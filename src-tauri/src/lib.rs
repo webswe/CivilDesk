@@ -64,6 +64,21 @@ fn brightspace_cancel(app: tauri::AppHandle) {
     app.state::<BrightspaceState>().0.cancel();
 }
 
+#[tauri::command]
+fn brightspace_course_mode(app: tauri::AppHandle) -> &'static str {
+    app.state::<BrightspaceState>().0.course_mode()
+}
+
+#[tauri::command]
+async fn brightspace_courses(app: tauri::AppHandle) -> Result<brightspace::CourseSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<RuntimeState>();
+        app.state::<BrightspaceState>().0.courses(db.database()?)
+    })
+    .await
+    .map_err(|_| "Brightspace courses could not be loaded.".to_string())?
+}
+
 struct RuntimeState {
     database: Option<Database>,
     initialization_error: Option<String>,
@@ -918,7 +933,9 @@ pub fn run() {
             brightspace_configuration,
             brightspace_save_configuration,
             brightspace_inspect,
-            brightspace_cancel
+            brightspace_cancel,
+            brightspace_course_mode,
+            brightspace_courses
         ])
         .run(tauri::generate_context!())
         .expect("CivilDesk could not start");

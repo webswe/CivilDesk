@@ -19,3 +19,14 @@ export async function brightspaceInspect(): Promise<BrightspaceInspection> {
 export async function brightspaceCancel(): Promise<void> {
   if (native()) await invoke('brightspace_cancel');
 }
+
+export interface BrightspaceCourse { id: string; code: string; name: string; semester_name: string; is_active: boolean; can_access: boolean; is_new_enrollment: boolean; start_date: string | null; end_date: string | null }
+export interface BrightspaceCourseSnapshot { portalOrigin: string; mode: 'demo' | 'synthetic_cli'; retrievedAtMs: number; complete: boolean; warnings: string[]; courses: BrightspaceCourse[] }
+export type BrightspaceCourseMode = 'demo' | 'synthetic_cli' | 'unavailable';
+export async function brightspaceCourseMode(): Promise<BrightspaceCourseMode> { return native() ? invoke('brightspace_course_mode') : 'demo'; }
+const demo = (id: string, code: string, name: string, semester_name: string): BrightspaceCourse => ({ id, code, name, semester_name, is_active: true, can_access: true, is_new_enrollment: false, start_date: null, end_date: null });
+/** Browser preview is labeled synthetic and never requests Brightspace. */
+export async function brightspaceCourses(): Promise<BrightspaceCourseSnapshot> {
+  if (native()) return invoke('brightspace_courses');
+  return { portalOrigin: 'https://synthetic.example.test', mode: 'demo', retrievedAtMs: Date.now(), complete: true, warnings: [], courses: [demo('610101', 'CIV 201', 'Structures and the Built Environment', 'Sample Fall Term'), demo('610202', 'MATH 240', 'Applied Mathematics for Designers', 'Sample Fall Term'), demo('610303', '', 'A Very Long Sample Course Title for Narrow Windows and Detail Navigation', '')] };
+}

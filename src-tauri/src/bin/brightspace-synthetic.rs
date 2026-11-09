@@ -30,6 +30,7 @@ fn main() {
     let args: Vec<_> = std::env::args().skip(1).collect();
     let capability = ["auth", "capabilities", "--json", "--contract-version", "1"];
     let status = ["auth", "status", "--json", "--contract-version", "1"];
+    let courses = ["courses", "list", "--json"];
     if args.iter().map(String::as_str).collect::<Vec<_>>() == capability {
         match scenario {
             "timeout" => std::thread::sleep(Duration::from_secs(30)),
@@ -68,6 +69,59 @@ fn main() {
             json!({"contract_version":1,"capabilities":CAPS,"error_code":null,"message":"Capabilities available."})
         );
         return;
+    }
+    if args.iter().map(String::as_str).collect::<Vec<_>>() == courses {
+        let course = |id: &str, code: &str, name: &str, semester: &str| {
+            json!({
+                "id":id,"code":code,"name":name,"semester_name":semester,
+                "is_active":true,"can_access":true,"is_new_enrollment":false,
+                "start_date":null,"end_date":null
+            })
+        };
+        match scenario {
+            "courses_timeout" => std::thread::sleep(Duration::from_secs(30)),
+            "courses_oversized" => {
+                let _ = std::io::stdout().write_all(&vec![b'x'; 40_000]);
+                return;
+            }
+            "courses_invalid_json" => {
+                println!("{{invalid");
+                return;
+            }
+            "courses_failure" => {
+                eprintln!("Synthetic failure without credentials.");
+                std::process::exit(1);
+            }
+            "courses_malformed" => {
+                println!("{}", json!({"courses":[{"id":"bad","name":"Malformed"}]}));
+                return;
+            }
+            "courses_empty" => {
+                println!("{}", json!({"courses":[]}));
+                return;
+            }
+            "courses_duplicate_names" => {
+                println!(
+                    "{}",
+                    json!({"courses":[course("610101","CIV 201","Shared Title","Sample Fall Term"),course("610102","CIV 202","Shared Title","Sample Fall Term")]})
+                );
+                return;
+            }
+            "courses_missing_optional" => {
+                println!(
+                    "{}",
+                    json!({"courses":[course("610303","","A Very Long Sample Course Title for Narrow Windows and Detail Navigation","")]})
+                );
+                return;
+            }
+            _ => {
+                println!(
+                    "{}",
+                    json!({"courses":[course("610101","CIV 201","Structures and the Built Environment","Sample Fall Term"),course("610202","MATH 240","Applied Mathematics for Designers","Sample Fall Term")]})
+                );
+                return;
+            }
+        }
     }
     if args.iter().map(String::as_str).collect::<Vec<_>>() != status {
         std::process::exit(8);
