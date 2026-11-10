@@ -1,6 +1,6 @@
 // Engineering: library, pathways, skills, challenge progress, challenge-to-project, journal, no XP.
 import { $, $$, expect } from '@wdio/globals';
-import { button, go, navButton, onboard } from '../lib/app.mjs';
+import { button, go, navButton, onboard, waitForPersisted } from '../lib/app.mjs';
 
 async function openEngineering(label) {
   const toggle = navButton('Engineering');
@@ -44,6 +44,9 @@ describe('engineering (real application)', () => {
     await expect($('//button[normalize-space(.)="Mark completed"]')).toBeDisabled();
     for (let i = 0; i < boxes.length; i++) {
       await $(`(//label[contains(@class,"challenge-check")]//input)[${i + 1}]`).click();
+      await waitForPersisted('load_challenges', data => data.progress.some(p => p.checks.includes(i)), `challenge criterion ${i + 1} checked`);
+      await expect($(`(//label[contains(@class,"challenge-check")]//input)[${i + 1}]`)).toBeChecked();
+      await expect($(`//small[contains(.,"${i + 1} of ${boxes.length} criteria checked")]`)).toBeDisplayed();
     }
     await expect($(`//small[contains(.,"${boxes.length} of ${boxes.length} criteria checked")]`)).toBeDisplayed();
     await expect($('//button[normalize-space(.)="Mark completed"]')).toBeEnabled();

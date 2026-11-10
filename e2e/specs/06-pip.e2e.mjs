@@ -39,6 +39,7 @@ describe('Pip (real application)', () => {
     await button('Hide Pip').click();
     await expect($('//h2[normalize-space(.)="Pip is taking a break"]')).toBeDisplayed();
     await expect(dock()).not.toBeExisting();
+    await waitForPersisted('load_snapshot', data => data.preferences.pipVisible === false, 'Pip hidden preference');
     await restartApp();
     await go('Pip');
     await expect($('//h2[normalize-space(.)="Pip is taking a break"]')).toBeDisplayed();
