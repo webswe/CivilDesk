@@ -1,4 +1,5 @@
 //! Restricted D2L-CLI adapter. Course reads are available only in the synthetic E2E build.
+use crate::brightspace_package::{is_frozen_package, verify_for_launch};
 use crate::persistence::Database;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,8 @@ struct StoredConfig {
     portal_origin: String,
     executable_path: String,
     executable_sha256: String,
+    #[serde(default)]
+    frozen_package: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -289,6 +292,7 @@ impl Adapter {
                 &canonical,
                 &config.executable_sha256,
                 &config.portal_origin,
+                config.frozen_package,
                 &["auth", "capabilities", "--json", "--contract-version", "1"],
             )
             .map_err(course_process_message)?;
@@ -299,6 +303,7 @@ impl Adapter {
                 &canonical,
                 &config.executable_sha256,
                 &config.portal_origin,
+                config.frozen_package,
                 &["courses", "list", "--json"],
             )
             .map_err(course_process_message)?;
@@ -367,6 +372,7 @@ impl Adapter {
                     &canonical,
                     &config.executable_sha256,
                     &config.portal_origin,
+                    config.frozen_package,
                     &args,
                 )
                 .map_err(|kind| {
@@ -475,6 +481,7 @@ impl Adapter {
                     &canonical,
                     &config.executable_sha256,
                     &config.portal_origin,
+                    config.frozen_package,
                     &args,
                 )
                 .map_err(|kind| {
@@ -549,11 +556,14 @@ impl Adapter {
             return Err("Choose the installed d2l.exe executable.".into());
         }
         self.check_synthetic_boundary(&origin, &canonical)?;
+        let frozen_package = is_frozen_package(&canonical);
+        verify_for_launch(&canonical, frozen_package).map_err(str::to_owned)?;
         let hash = file_sha256(&canonical)?;
         let value = StoredConfig {
             portal_origin: origin,
             executable_path: canonical.to_string_lossy().into_owned(),
             executable_sha256: hash,
+            frozen_package,
         };
         let serialized = serde_json::to_string(&value)
             .map_err(|_| "Brightspace settings could not be saved.")?;
@@ -670,6 +680,7 @@ impl Adapter {
             &canonical,
             &config.executable_sha256,
             &config.portal_origin,
+            config.frozen_package,
             &["auth", "capabilities", "--json", "--contract-version", "1"],
         ) {
             Ok(output) => output,
@@ -708,6 +719,7 @@ impl Adapter {
             &canonical,
             &config.executable_sha256,
             &config.portal_origin,
+            config.frozen_package,
             &["auth", "status", "--json", "--contract-version", "1"],
         ) {
             Ok(output) => output,
@@ -757,6 +769,7 @@ impl Adapter {
         executable: &Path,
         digest: &str,
         origin: &str,
+        configured_frozen: bool,
         args: &[&str],
     ) -> Result<Output, &'static str> {
         if self.cancelled.load(Ordering::SeqCst) {
@@ -765,6 +778,7 @@ impl Adapter {
         if file_sha256(executable).as_deref() != Ok(digest) {
             return Err("cli_untrusted");
         }
+        verify_for_launch(executable, configured_frozen).map_err(|_| "cli_untrusted")?;
         let mut command = Command::new(executable);
         command
             .args(args)
@@ -998,6 +1012,9 @@ fn process_message(kind: &str) -> &'static str {
         "cli_timeout" => "D2L-CLI did not respond in time.",
         "output_too_large" => "D2L-CLI returned too much output.",
         "cli_unavailable" => "The configured D2L-CLI executable could not be started.",
+        "cli_untrusted" => {
+            "The D2L-CLI package changed or lacks approval. Review its trusted manifest."
+        }
         "cancelled" => "The Brightspace status check was cancelled.",
         _ => "D2L-CLI could not complete the status check.",
     }
@@ -1870,5 +1887,50 @@ mod tests {
         assert_eq!(adapter.inspect(&db).state, "cli_untrusted");
         std::fs::remove_file(exe).unwrap();
         std::fs::remove_dir(dir).unwrap();
+    }
+
+    #[cfg(not(feature = "notion-mock"))]
+    #[test]
+    fn frozen_package_is_rejected_before_process_launch_or_configuration_save() {
+        let dir = std::env::temp_dir().join(format!(
+            "civildesk-frozen-boundary-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(dir.join("_internal")).unwrap();
+        let exe = dir.join("d2l.exe");
+        std::fs::write(&exe, b"synthetic, not executable").unwrap();
+        let exe = exe.canonicalize().unwrap();
+        let adapter = Adapter::new("com.webswe.civildesk.dev").unwrap();
+        let db = Database(Mutex::new(Connection::open_in_memory().unwrap()));
+        db.0.lock()
+            .unwrap()
+            .execute(
+                "CREATE TABLE app_state(key TEXT PRIMARY KEY,value TEXT NOT NULL)",
+                [],
+            )
+            .unwrap();
+        assert!(adapter
+            .save(&db, "https://synthetic.example.test", exe.to_str().unwrap())
+            .err()
+            .unwrap()
+            .contains("not approved"));
+        assert!(adapter.configuration(&db).unwrap().is_none());
+        let digest = file_sha256(&exe).unwrap();
+        adapter.cancelled.store(false, Ordering::SeqCst);
+        assert!(matches!(
+            adapter.run(
+                &exe,
+                &digest,
+                "https://synthetic.example.test",
+                true,
+                &["auth", "capabilities", "--json", "--contract-version", "1"]
+            ),
+            Err("cli_untrusted")
+        ));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

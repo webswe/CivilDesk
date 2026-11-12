@@ -1,5 +1,6 @@
 mod academic;
 mod brightspace;
+mod brightspace_package;
 mod calendar;
 mod challenges;
 mod dates;

@@ -131,3 +131,65 @@ retrieval require separate owner authorization.
 
 The eventual Assignment Calendar must use class filters and due dates without
 creating duplicate global Calendar events.
+
+## Frozen Windows package trust (prepared, not approved for installation)
+
+`src-tauri/src/brightspace_package.rs` verifies PyInstaller one-directory
+packages. The approved trust record must be compiled into a reviewed CivilDesk
+build and must name a manifest **outside** the package plus its exact SHA-256.
+The selected path, package contents, and writable SQLite settings cannot supply
+that expected digest. The production approval record is currently empty, so a
+directory containing `_internal` is rejected during configuration and again
+before process launch. Existing standalone launcher settings and the dedicated
+synthetic E2E executable retain their previous behavior. A saved frozen-package
+mode also prevents a future approved package from reverting to executable-only
+checks if `_internal` disappears.
+
+The verifier requires a canonical package directory and `d2l.exe` at its root.
+It verifies the manifest digest before parsing, accepts only schema
+`civildesk-d2l-windows-onedir-v1`, rejects malformed records and unsafe paths,
+checks every listed file's size and SHA-256, and rejects missing, modified, or
+**extra files and directories**. It rejects links and Windows reparse points
+inside the package, including junctions. The manifest is not stored inside the
+package. Failure returns a fixed, sanitized trust error and prevents launch;
+there is no fallback to hashing only `d2l.exe` for a frozen package. The
+existing fixed commands, selected profiles, portal binding, cleared child
+environment, timeout, output limits, cancellation, and strict JSON parsing
+remain in force.
+
+The candidate at D2L-CLI source commit `d3062ec` is **unsigned**. Its manifest
+and executable were verified against independently recorded hashes, but no
+production trust anchor has been provisioned. Two builds from the same pinned
+inputs differed in `d2l.exe` and `base_library.zip`; byte-for-byte
+reproducibility is not established. Before installation, review and approve
+the precise package and manifest digest, provision the trusted manifest apart
+from the package, compile the digest and location into a reviewed CivilDesk
+build, place the package in a controlled directory, verify it before selection,
+and preserve the previous installation for side-by-side rollback. Do not
+overwrite a configured package in place or silently accept a changed hash.
+
+Offline tests of an isolated candidate copy confirmed contract-v1 capability
+JSON and configuration failures that stop before credential access. A valid
+profile and origin would reach Windows Credential Manager; that status path and
+positive credential presence remain unverified because no isolated fake store
+was established. The candidate includes Playwright's Node driver and Python
+library but **does not include Chromium**. Playwright 1.63.0 expects a matching
+browser revision, normally found in the Windows `ms-playwright` user cache or
+an explicitly selected `PLAYWRIGHT_BROWSERS_PATH`. No browser was downloaded,
+launched, or added to the package. A separately approved browser runtime and
+isolated synthetic browser test are prerequisites before login evaluation.
+The current adapter clears `PLAYWRIGHT_BROWSERS_PATH` from child processes, so
+any future browser launch through CivilDesk would use Playwright's default
+per-user cache unless a separately reviewed allowlist or bundled browser path
+is added. The packaged Node driver is present; it is not a browser binary.
+The existing native E2E harness also invokes Windows `cmdkey` for its fixed
+synthetic Notion E2E target during setup and cleanup. That is an interaction
+with the actual Windows Credential Manager, although it cannot name a D2L,
+production, or Acceptance credential. A future run under a strict no-store
+policy must isolate or replace that harness cleanup first.
+
+Hashing proves correspondence to the approved manifest at check time. It does
+not establish publisher identity, contain a same-user attacker, or remove the
+replacement window between verification and Windows process creation. A
+same-user attacker may also alter the CivilDesk binary, settings, package, or
+credential store. Production academic reads remain build-gated off.
