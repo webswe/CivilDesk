@@ -6,6 +6,16 @@ import path from 'node:path';
 
 const E2E_WORKFLOW = '.github/workflows/e2e-windows.yml';
 
+// Windows checkouts may use CRLF even when the tracked Rust source uses LF.
+// Match the same required controls under either line ending, without relaxing
+// the feature gate or the manually ignored OS credential-store test.
+export function hasE2eCredentialSourceControls(source) {
+  const text = source.replace(/\r\n/g, '\n');
+  return text.includes('#[cfg(feature = "notion-mock")]\npub struct E2eMemoryStore')
+    && text.includes('http://127.0.0.1:4456/credential')
+    && text.includes('#[ignore = "manual OS credential-store test; excluded from offline verification"]');
+}
+
 // Anything that selects Cargo features, sets compiler cfg flags or supplies the mock endpoint.
 // Forbidden in every distribution surface (release, Acceptance, CI, package scripts, Tauri configs, cargo config).
 const FORBIDDEN_IN_DISTRIBUTION = [

@@ -5,7 +5,7 @@ import console from 'node:console';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { checkNotionMockIsolation } from './lib/notion-mock-guard.mjs';
+import { checkNotionMockIsolation, hasE2eCredentialSourceControls } from './lib/notion-mock-guard.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = file => readFileSync(path.join(root, file), 'utf8');
@@ -63,7 +63,7 @@ const cargoTarget = read('e2e/lib/cargo-target.mjs');
 const brightspaceSpec = read('e2e/specs/14-brightspace.e2e.mjs');
 const notionSpec = read('e2e/specs/13-notion.e2e.mjs');
 assert.ok(/assert_eq!\(\s*identifier, "com\.webswe\.civildesk\.e2e"/.test(notionService) && notionService.includes('Box::new(E2eMemoryStore)') && notionService.includes('Box::new(CredentialManagerStore::for_identity(identifier))'), 'Notion store must be selected by the isolated E2E build and identity.');
-assert.ok(secrets.includes('#[cfg(feature = "notion-mock")]\npub struct E2eMemoryStore') && secrets.includes('http://127.0.0.1:4456/credential') && secrets.includes('#[ignore = "manual OS credential-store test; excluded from offline verification"]'), 'E2E memory store and manual OS test gate must remain in place.');
+assert.ok(hasE2eCredentialSourceControls(secrets), 'E2E memory store and manual OS test gate must remain in place.');
 assert.ok(!/cmdkey|CredentialManagerStore|keyring|spawnSync/i.test(credentialHarness + wdio + notionSpec), 'Native E2E harness must not invoke the OS credential store.');
 assert.ok(cargoTarget.includes("'metadata', '--no-deps'") && cargoTarget.includes('.target_directory') && wdio.includes("from './lib/cargo-target.mjs'") && brightspaceSpec.includes("from '../lib/cargo-target.mjs'"), 'Native E2E app and fixture must use Cargo’s configured target directory.');
 assert.ok(!wdio.includes('CIVILDESK_E2E_BINARY'), 'Native E2E must not accept an arbitrary binary override.');

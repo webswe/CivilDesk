@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { checkNotionMockIsolation } from './notion-mock-guard.mjs';
+import { checkNotionMockIsolation, hasE2eCredentialSourceControls } from './notion-mock-guard.mjs';
 
 // Every negative case runs against a disposable copy; the real workflows are never modified.
 const real = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -26,6 +26,27 @@ function edit(dir, rel, from, to) {
   fs.writeFileSync(f, text.replace(from, to));
 }
 afterEach(() => { while (dirs.length) fs.rmSync(dirs.pop(), { recursive: true, force: true }); });
+
+describe('Notion E2E credential source controls', () => {
+  const source = fs.readFileSync(path.join(real, 'src-tauri/src/notion/secrets.rs'), 'utf8').replace(/\r\n/g, '\n');
+  const variants = [source, source.replace(/\n/g, '\r\n')];
+
+  it('accepts the required controls with LF and CRLF line endings', () => {
+    for (const text of variants) expect(hasE2eCredentialSourceControls(text)).toBe(true);
+  });
+
+  it('rejects removal of the feature gate, loopback memory endpoint, or manual OS test gate', () => {
+    for (const text of variants) {
+      for (const required of [
+        '#[cfg(feature = "notion-mock")]',
+        'http://127.0.0.1:4456/credential',
+        '#[ignore = "manual OS credential-store test; excluded from offline verification"]',
+      ]) {
+        expect(hasE2eCredentialSourceControls(text.replace(required, ''))).toBe(false);
+      }
+    }
+  });
+});
 
 describe('notion-mock build guard', () => {
   it('passes for the real repository configuration', () => { expect(checkNotionMockIsolation(real)).toEqual([]); });
