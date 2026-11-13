@@ -16,6 +16,7 @@ use std::{
 /// The one place the Notion API version is configured.
 pub const API_VERSION: &str = "2026-03-11";
 /// The only host the client talks to.
+#[cfg(any(not(feature = "notion-mock"), test))]
 pub const API_BASE: &str = "https://api.notion.com";
 pub const PREVIEW_PAGE_SIZE: u32 = 10;
 pub const LIST_PAGE_SIZE: u32 = 25;
