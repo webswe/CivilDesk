@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { brightspaceCancel, brightspaceConfiguration, brightspaceInspectCapabilities, brightspaceSaveConfiguration, type BrightspaceInspection } from './services/brightspace';
+import { brightspaceCancel, brightspaceConfiguration, brightspaceExecutionPolicy, brightspaceInspectCapabilities, brightspaceSaveConfiguration, type BrightspaceExecutionPolicy, type BrightspaceInspection } from './services/brightspace';
 import './brightspace.css';
 
 const labels: Record<string, string> = { not_configured: 'Not configured', configuration_error: 'Configuration error', cli_unavailable: 'CLI unavailable', cli_untrusted: 'Executable changed', cli_incompatible: 'CLI incompatible', cli_timeout: 'CLI timed out', output_too_large: 'CLI response too large', process_error: 'CLI error', cancelled: 'Check cancelled', capabilities_verified: 'CLI capabilities verified', authentication_required: 'Authentication required', credential_present_unverified: 'Credential stored, unverified', portal_mismatch: 'Portal mismatch', credential_error: 'Credential or storage error', verification_unavailable: 'Live verification unavailable' };
@@ -10,21 +10,24 @@ export function BrightspaceSettings() {
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [problem, setProblem] = useState<string | null>(null); const [busy, setBusy] = useState(false);
   const [inspecting, setInspecting] = useState(false);
+  const [policy, setPolicy] = useState<BrightspaceExecutionPolicy | null>(null);
   useEffect(() => { let active = true; void brightspaceConfiguration().then(config => { if (active) { setConfigured(config !== null); if (config) { setPortal(config.portalOrigin); setExecutable(config.executablePath); } } }).catch(() => { if (active) setProblem('Brightspace settings could not be loaded.'); }); return () => { active = false; }; }, []);
+  useEffect(() => { let active = true; void brightspaceExecutionPolicy().then(value => { if (active) setPolicy(value); }).catch(() => { if (active) setPolicy('frozen_unapproved'); }); return () => { active = false; }; }, []);
   const save = async (event: FormEvent) => { event.preventDefault(); setBusy(true); setProblem(null); setInspection(null); try { const config = await brightspaceSaveConfiguration(portal, executable); setPortal(config.portalOrigin); setExecutable(config.executablePath); setConfigured(true); } catch (error) { setProblem(typeof error === 'string' ? error : error instanceof Error ? error.message : 'Brightspace settings could not be saved.'); } finally { setBusy(false); } };
   const inspect = async () => { setBusy(true); setInspecting(true); setProblem(null); try { setInspection(await brightspaceInspectCapabilities()); } catch { setProblem('Brightspace capabilities could not be inspected.'); } finally { setBusy(false); setInspecting(false); } };
   const label = inspection ? labels[inspection.state] ?? 'CLI error' : configured === false ? 'Not configured' : 'Not checked';
   return <section className="setting-group brightspace-panel" aria-labelledby="brightspace-heading">
     <div className="brightspace-head"><h2 id="brightspace-heading">Brightspace</h2><span className="brightspace-badge" role="status">{label}</span></div>
-    <p>Configure the portal and D2L-CLI executable you trust. CivilDesk checks CLI capabilities only. It does not inspect credentials, sign in, retrieve courses, or sync School data.</p>
+    <p>Capability inspection requires an independently approved frozen D2L-CLI package. It does not inspect credentials, sign in, retrieve courses, or sync School data.</p>
+    {policy === 'frozen_unapproved' && <p className="brightspace-caution">No D2L-CLI package is approved in this build. Capability inspection is unavailable. A saved standalone executable does not satisfy package trust.</p>}
     <form onSubmit={e => void save(e)} autoComplete="off">
       <label htmlFor="brightspace-portal">Brightspace portal origin</label>
       <input id="brightspace-portal" type="url" spellCheck={false} value={portal} onChange={e => setPortal(e.target.value)} placeholder="https://learn.example.edu" />
       <small>Use the plain HTTPS origin, without a path, query, or sign-in details.</small>
       <label htmlFor="brightspace-executable">Trusted D2L-CLI executable</label>
       <input id="brightspace-executable" type="text" spellCheck={false} value={executable} onChange={e => setExecutable(e.target.value)} placeholder="C:\\Tools\\d2l.exe" />
-      <small>Choose an installed executable you trust. CivilDesk remembers its path and file fingerprint.</small>
-      <div className="brightspace-actions"><button className="primary-button" type="submit" disabled={busy || !portal || !executable}>Save settings</button><button className="soft-button" type="button" onClick={() => void inspect()} disabled={busy}>Inspect capabilities</button>{inspecting && <button className="soft-button" type="button" onClick={() => void brightspaceCancel()}>Cancel check</button>}</div>
+      <small>Only the approved frozen package at its approved installation location can be selected. Existing standalone settings remain saved but cannot run.</small>
+      <div className="brightspace-actions"><button className="primary-button" type="submit" disabled={busy || policy !== 'frozen_approved' && policy !== 'synthetic_e2e' || !portal || !executable}>Save settings</button><button className="soft-button" type="button" onClick={() => void inspect()} disabled={busy || policy !== 'frozen_approved' && policy !== 'synthetic_e2e'}>Inspect capabilities</button>{inspecting && <button className="soft-button" type="button" onClick={() => void brightspaceCancel()}>Cancel check</button>}</div>
     </form>
     {problem && <p role="alert" className="brightspace-problem">{problem}</p>}
     {inspection && <div className="brightspace-result"><p>{inspection.message}</p><dl>

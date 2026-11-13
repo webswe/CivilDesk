@@ -28,6 +28,11 @@ use tauri::Manager;
 struct BrightspaceState(brightspace::Adapter);
 
 #[tauri::command]
+fn brightspace_execution_policy(app: tauri::AppHandle) -> &'static str {
+    app.state::<BrightspaceState>().0.execution_policy()
+}
+
+#[tauri::command]
 fn brightspace_configuration(
     app: tauri::AppHandle,
 ) -> Result<Option<brightspace::ConfigView>, String> {
@@ -995,6 +1000,7 @@ pub fn run() {
             notion_set_source_selected,
             notion_selected_sources,
             brightspace_configuration,
+            brightspace_execution_policy,
             brightspace_save_configuration,
             brightspace_inspect_capabilities,
             brightspace_inspect_synthetic_status,

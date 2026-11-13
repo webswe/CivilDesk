@@ -5,6 +5,10 @@ export type BrightspaceState = 'not_configured' | 'configuration_error' | 'cli_u
 export interface BrightspaceInspection { state: BrightspaceState; profileId: string; portalOrigin: string | null; executablePath: string | null; cliAvailable: boolean; cliCompatible: boolean; liveVerified: boolean; message: string }
 
 const native = () => '__TAURI_INTERNALS__' in window;
+export type BrightspaceExecutionPolicy = 'frozen_unapproved' | 'frozen_approved' | 'synthetic_e2e';
+export async function brightspaceExecutionPolicy(): Promise<BrightspaceExecutionPolicy> {
+  return native() ? invoke('brightspace_execution_policy') : 'frozen_unapproved';
+}
 let preview: BrightspaceConfiguration | null = null;
 export async function brightspaceConfiguration(): Promise<BrightspaceConfiguration | null> { return native() ? invoke('brightspace_configuration') : preview; }
 export async function brightspaceSaveConfiguration(portalOrigin: string, executablePath: string): Promise<BrightspaceConfiguration> {

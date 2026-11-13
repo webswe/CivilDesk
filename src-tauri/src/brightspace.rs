@@ -1,5 +1,7 @@
 //! Restricted D2L-CLI adapter. Course reads are available only in the synthetic E2E build.
 use crate::brightspace_package::{is_frozen_package, verify_for_launch};
+#[cfg(test)]
+use crate::brightspace_package::{verify_for_launch_with, ApprovedFrozen};
 use crate::persistence::Database;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -196,9 +198,23 @@ pub struct Adapter {
     profile: &'static str,
     cancelled: AtomicBool,
     in_flight: Mutex<()>,
+    #[cfg(test)]
+    test_approval: Option<ApprovedFrozen>,
 }
 
 impl Adapter {
+    pub fn execution_policy(&self) -> &'static str {
+        #[cfg(feature = "notion-mock")]
+        if self.identity == "com.webswe.civildesk.e2e" {
+            return "synthetic_e2e";
+        }
+        if crate::brightspace_package::has_approved_frozen() {
+            "frozen_approved"
+        } else {
+            "frozen_unapproved"
+        }
+    }
+
     pub fn new(identity: &str) -> Result<Self, String> {
         let profile = match identity {
             "com.webswe.civildesk" => "civildesk-prod",
@@ -217,7 +233,24 @@ impl Adapter {
             profile,
             cancelled: AtomicBool::new(false),
             in_flight: Mutex::new(()),
+            #[cfg(test)]
+            test_approval: None,
         })
+    }
+
+    fn verify_cli(&self, origin: &str, executable: &Path, frozen: bool) -> Result<(), String> {
+        #[cfg(feature = "notion-mock")]
+        if self.identity == "com.webswe.civildesk.e2e" {
+            return self.check_synthetic_boundary(origin, executable);
+        }
+        #[cfg(not(feature = "notion-mock"))]
+        let _ = origin;
+        #[cfg(test)]
+        if let Some(approval) = self.test_approval.as_ref() {
+            return verify_for_launch_with(executable, frozen, Some(approval))
+                .map_err(str::to_owned);
+        }
+        verify_for_launch(executable, frozen).map_err(str::to_owned)
     }
 
     fn load(&self, db: &Database) -> Result<Option<StoredConfig>, String> {
@@ -558,7 +591,7 @@ impl Adapter {
         }
         self.check_synthetic_boundary(&origin, &canonical)?;
         let frozen_package = is_frozen_package(&canonical);
-        verify_for_launch(&canonical, frozen_package).map_err(str::to_owned)?;
+        self.verify_cli(&origin, &canonical, frozen_package)?;
         let hash = file_sha256(&canonical)?;
         let value = StoredConfig {
             portal_origin: origin,
@@ -924,7 +957,8 @@ impl Adapter {
         if file_sha256(executable).as_deref() != Ok(digest) {
             return Err("cli_untrusted");
         }
-        verify_for_launch(executable, configured_frozen).map_err(|_| "cli_untrusted")?;
+        self.verify_cli(origin, executable, configured_frozen)
+            .map_err(|_| "cli_untrusted")?;
         let mut command = Command::new(executable);
         command
             .args(args)
@@ -1989,7 +2023,7 @@ mod tests {
     }
     #[cfg(not(feature = "notion-mock"))]
     #[test]
-    fn settings_store_only_nonsecret_origin_path_and_fingerprint() {
+    fn legacy_standalone_settings_remain_stored_but_cannot_launch() {
         let db = Database(Mutex::new(Connection::open_in_memory().unwrap()));
         db.0.lock()
             .unwrap()
@@ -2017,13 +2051,24 @@ mod tests {
         std::fs::remove_file(other).unwrap();
         let exe = dir.join("d2l.exe");
         std::fs::write(&exe, b"SYNTHETIC_NOT_EXECUTED").unwrap();
-        let saved = adapter
+        assert!(adapter
             .save(&db, "https://LEARN.example.EDU:443/", exe.to_str().unwrap())
+            .is_err());
+        let old = serde_json::json!({
+            "portalOrigin":"https://learn.example.edu",
+            "executablePath":exe.canonicalize().unwrap().to_string_lossy(),
+            "executableSha256":file_sha256(&exe).unwrap()
+        });
+        db.0.lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO app_state(key,value) VALUES (?1,?2)",
+                rusqlite::params![KEY, old.to_string()],
+            )
             .unwrap();
-        assert_eq!(saved.portal_origin, "https://learn.example.edu");
         assert_eq!(
             adapter.configuration(&db).unwrap().unwrap().portal_origin,
-            saved.portal_origin
+            "https://learn.example.edu"
         );
         let raw: String =
             db.0.lock()
@@ -2034,6 +2079,7 @@ mod tests {
                 .unwrap();
         assert!(raw.contains("executableSha256"));
         assert!(!raw.contains("cookie") && !raw.contains("token") && !raw.contains("password"));
+        assert_eq!(adapter.inspect_capabilities(&db).state, "cli_untrusted");
         std::fs::remove_file(&exe).unwrap();
         assert_eq!(adapter.inspect_capabilities(&db).state, "cli_unavailable");
         std::fs::write(&exe, b"CHANGED_SYNTHETIC_NOT_EXECUTED").unwrap();
@@ -2070,7 +2116,7 @@ mod tests {
             .save(&db, "https://synthetic.example.test", exe.to_str().unwrap())
             .err()
             .unwrap()
-            .contains("not approved"));
+            .contains("approved"));
         assert!(adapter.configuration(&db).unwrap().is_none());
         let digest = file_sha256(&exe).unwrap();
         adapter.cancelled.store(false, Ordering::SeqCst);
@@ -2122,7 +2168,7 @@ mod tests {
     #[cfg(all(windows, not(feature = "notion-mock")))]
     #[test]
     fn capability_inspection_runs_only_the_fixed_credential_free_command() {
-        let dir = std::env::temp_dir().join(format!(
+        let parent = std::env::temp_dir().join(format!(
             "civildesk-scope-a-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -2130,15 +2176,17 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        std::fs::create_dir(&dir).unwrap();
-        let source = dir.join("fixture.rs");
+        let dir = parent.join("package");
+        std::fs::create_dir_all(dir.join("_internal")).unwrap();
+        let dir = dir.canonicalize().unwrap();
+        let source = parent.join("fixture.rs");
         let exe = dir.join("d2l.exe");
         std::fs::write(
             &source,
             r#"
             use std::{env, fs, io::Write};
             fn main() {
-                let dir = env::current_exe().unwrap().parent().unwrap().to_path_buf();
+                let dir = env::current_exe().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
                 let args: Vec<String> = env::args().skip(1).collect();
                 let mut log = fs::OpenOptions::new().create(true).append(true)
                     .open(dir.join("invocations.txt")).unwrap();
@@ -2168,6 +2216,51 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&compiled.stderr)
         );
+        let debug_symbols = dir.join("d2l.pdb");
+        if debug_symbols.exists() {
+            std::fs::remove_file(debug_symbols).unwrap();
+        }
+        std::fs::write(dir.join("_internal/python311.dll"), b"synthetic runtime").unwrap();
+        std::fs::write(dir.join("_internal/base_library.zip"), b"synthetic library").unwrap();
+        let mut files = serde_json::Map::new();
+        for name in [
+            "d2l.exe",
+            "_internal/python311.dll",
+            "_internal/base_library.zip",
+        ] {
+            let path = dir.join(name);
+            files.insert(
+                name.into(),
+                serde_json::json!({
+                    "size":std::fs::metadata(&path).unwrap().len(),
+                    "sha256":file_sha256(&path).unwrap()
+                }),
+            );
+        }
+        let zero = "0".repeat(64);
+        let manifest = parent.join("trusted-manifest.json");
+        std::fs::write(
+            &manifest,
+            serde_json::json!({
+                "schema":"civildesk-d2l-windows-onedir-v1",
+                "source_commit":"a".repeat(40),"source_archive_sha256":zero,
+                "source_file_count":3,"python_version":"synthetic",
+                "python_executable_sha256":"0".repeat(64),"pyinstaller_version":"synthetic",
+                "uv_version":"synthetic","lockfile_sha256":"0".repeat(64),
+                "toolchain_requirements_sha256":"0".repeat(64),
+                "runtime_requirements_sha256":"0".repeat(64),
+                "entry_script_sha256":"0".repeat(64),
+                "build_environment":"synthetic","build_command":"synthetic",
+                "executable_sha256":file_sha256(&exe).unwrap(),
+                "browser_bundle":"none","reproducibility_limitations":"synthetic",
+                "approved_package_index":"https://pypi.org/simple",
+                "toolchain_wheels":[{"requirement":"test==1","sha256":"0".repeat(64)}],
+                "runtime_lock_export":"synthetic","verification_procedure":"synthetic",
+                "tested_offline":"synthetic","files":files
+            })
+            .to_string(),
+        )
+        .unwrap();
         let db = Database(Mutex::new(Connection::open_in_memory().unwrap()));
         db.0.lock()
             .unwrap()
@@ -2176,21 +2269,29 @@ mod tests {
                 [],
             )
             .unwrap();
-        let adapter = Adapter::new("com.webswe.civildesk.dev").unwrap();
+        let mut adapter = Adapter::new("com.webswe.civildesk.dev").unwrap();
+        assert!(adapter
+            .save(&db, "https://synthetic.example.test", exe.to_str().unwrap())
+            .is_err());
+        adapter.test_approval = Some(ApprovedFrozen {
+            installation_root: dir.clone(),
+            manifest_path: manifest.clone(),
+            manifest_sha256: file_sha256(&manifest).unwrap(),
+        });
         adapter
             .save(&db, "https://synthetic.example.test", exe.to_str().unwrap())
             .unwrap();
         let response = serde_json::json!({
             "contract_version":1,"capabilities":REQUIRED,"error_code":null,"message":"Available."
         });
-        std::fs::write(dir.join("response.json"), response.to_string()).unwrap();
-        std::fs::write(dir.join("exit.txt"), "0").unwrap();
+        std::fs::write(parent.join("response.json"), response.to_string()).unwrap();
+        std::fs::write(parent.join("exit.txt"), "0").unwrap();
         assert_eq!(
             adapter.inspect_capabilities(&db).state,
             "capabilities_verified"
         );
         std::fs::write(
-            dir.join("response.json"),
+            parent.join("response.json"),
             serde_json::json!({
                 "contract_version":2,"capabilities":[],"error_code":"unsupported_contract",
                 "message":"Unsupported."
@@ -2198,10 +2299,10 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        std::fs::write(dir.join("exit.txt"), "2").unwrap();
+        std::fs::write(parent.join("exit.txt"), "2").unwrap();
         assert_eq!(adapter.inspect_capabilities(&db).state, "cli_incompatible");
         assert_eq!(
-            std::fs::read_to_string(dir.join("invocations.txt")).unwrap(),
+            std::fs::read_to_string(parent.join("invocations.txt")).unwrap(),
             "auth capabilities --json --contract-version 1\nauth capabilities --json --contract-version 1\n"
         );
         let raw: String =
@@ -2211,26 +2312,108 @@ mod tests {
                     row.get(0)
                 })
                 .unwrap();
-        let mut stored: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        stored["portalOrigin"] = serde_json::json!("http://synthetic.example.test");
-        db.0.lock()
+        let saved: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let update = |value: &serde_json::Value| {
+            db.0.lock()
+                .unwrap()
+                .execute(
+                    "UPDATE app_state SET value=?1 WHERE key=?2",
+                    rusqlite::params![value.to_string(), KEY],
+                )
+                .unwrap();
+        };
+        let launched = || {
+            std::fs::read_to_string(parent.join("invocations.txt"))
+                .unwrap()
+                .lines()
+                .count()
+        };
+        let without_approval = Adapter::new("com.webswe.civildesk.dev").unwrap();
+        assert_eq!(
+            without_approval.inspect_capabilities(&db).state,
+            "cli_untrusted"
+        );
+        assert_eq!(launched(), 2);
+        for value in [
+            {
+                let mut v = saved.clone();
+                v.as_object_mut().unwrap().remove("frozenPackage");
+                v
+            },
+            {
+                let mut v = saved.clone();
+                v["frozenPackage"] = serde_json::json!(false);
+                v
+            },
+            {
+                let mut v = saved.clone();
+                v["executableSha256"] = serde_json::json!("0".repeat(64));
+                v
+            },
+        ] {
+            update(&value);
+            assert_eq!(adapter.inspect_capabilities(&db).state, "cli_untrusted");
+            assert_eq!(launched(), 2);
+        }
+        update(&saved);
+        let alternate = parent.join("alternate");
+        std::fs::create_dir_all(alternate.join("_internal")).unwrap();
+        for name in [
+            "d2l.exe",
+            "_internal/python311.dll",
+            "_internal/base_library.zip",
+        ] {
+            std::fs::copy(dir.join(name), alternate.join(name)).unwrap();
+        }
+        let mut moved_config = saved.clone();
+        moved_config["executablePath"] = serde_json::json!(alternate
+            .canonicalize()
             .unwrap()
-            .execute(
-                "UPDATE app_state SET value=?1 WHERE key=?2",
-                rusqlite::params![stored.to_string(), KEY],
-            )
-            .unwrap();
+            .join("d2l.exe")
+            .to_string_lossy());
+        update(&moved_config);
+        assert_eq!(adapter.inspect_capabilities(&db).state, "cli_untrusted");
+        assert_eq!(launched(), 2);
+        update(&saved);
+        let runtime = dir.join("_internal/python311.dll");
+        std::fs::write(&runtime, b"modified runtime").unwrap();
+        assert_eq!(adapter.inspect_capabilities(&db).state, "cli_untrusted");
+        assert_eq!(launched(), 2);
+        std::fs::copy(alternate.join("_internal/python311.dll"), &runtime).unwrap();
+        std::fs::write(&exe, b"modified executable").unwrap();
+        assert_eq!(adapter.inspect_capabilities(&db).state, "cli_untrusted");
+        assert_eq!(launched(), 2);
+        std::fs::copy(alternate.join("d2l.exe"), &exe).unwrap();
+        let original_manifest = std::fs::read(&manifest).unwrap();
+        std::fs::write(&manifest, b"replaced manifest").unwrap();
+        assert_eq!(adapter.inspect_capabilities(&db).state, "cli_untrusted");
+        assert_eq!(launched(), 2);
+        std::fs::remove_file(&manifest).unwrap();
+        assert_eq!(adapter.inspect_capabilities(&db).state, "cli_untrusted");
+        assert_eq!(launched(), 2);
+        std::fs::write(&manifest, original_manifest).unwrap();
+        let relocated = parent.join("relocated");
+        std::fs::rename(&dir, &relocated).unwrap();
+        assert_eq!(adapter.inspect_capabilities(&db).state, "cli_unavailable");
+        assert_eq!(launched(), 2);
+        std::fs::rename(&relocated, &dir).unwrap();
+        std::fs::remove_dir_all(dir.join("_internal")).unwrap();
+        assert_eq!(adapter.inspect_capabilities(&db).state, "cli_untrusted");
+        assert_eq!(launched(), 2);
+        let mut stored = saved.clone();
+        stored["portalOrigin"] = serde_json::json!("http://synthetic.example.test");
+        update(&stored);
         assert_eq!(
             adapter.inspect_capabilities(&db).state,
             "configuration_error"
         );
         assert_eq!(
-            std::fs::read_to_string(dir.join("invocations.txt"))
+            std::fs::read_to_string(parent.join("invocations.txt"))
                 .unwrap()
                 .lines()
                 .count(),
             2
         );
-        std::fs::remove_dir_all(dir).unwrap();
+        std::fs::remove_dir_all(parent).unwrap();
     }
 }

@@ -241,7 +241,20 @@ pub fn verify_package(
 // Production approval is deliberately absent. Provisioning a package requires
 // a separately reviewed manifest path and digest in the application binary.
 // Neither the selected executable path nor SQLite settings can approve it.
-const APPROVED_FROZEN: Option<(&str, &str)> = None;
+// (canonical installation directory, independent manifest, manifest SHA-256).
+// This is compile-time trust, never a setting or inherited environment value.
+const APPROVED_FROZEN: Option<(&str, &str, &str)> = None;
+
+pub fn has_approved_frozen() -> bool {
+    APPROVED_FROZEN.is_some()
+}
+
+#[derive(Clone)]
+pub(crate) struct ApprovedFrozen {
+    pub installation_root: std::path::PathBuf,
+    pub manifest_path: std::path::PathBuf,
+    pub manifest_sha256: String,
+}
 
 pub fn is_frozen_package(executable: &Path) -> bool {
     executable
@@ -250,12 +263,38 @@ pub fn is_frozen_package(executable: &Path) -> bool {
 }
 
 pub fn verify_for_launch(executable: &Path, configured_frozen: bool) -> Result<(), &'static str> {
-    if !configured_frozen && !is_frozen_package(executable) {
-        return Ok(());
+    let approval = APPROVED_FROZEN.map(|(root, manifest, digest)| ApprovedFrozen {
+        installation_root: root.into(),
+        manifest_path: manifest.into(),
+        manifest_sha256: digest.into(),
+    });
+    verify_for_launch_with(executable, configured_frozen, approval.as_ref())
+}
+
+pub(crate) fn verify_for_launch_with(
+    executable: &Path,
+    configured_frozen: bool,
+    approval: Option<&ApprovedFrozen>,
+) -> Result<(), &'static str> {
+    let approval = approval.ok_or("No frozen D2L-CLI package has been approved.")?;
+    if !configured_frozen || !is_frozen_package(executable) {
+        return Err("Only an approved frozen D2L-CLI package may be used.");
     }
-    let (manifest, digest) =
-        APPROVED_FROZEN.ok_or("This frozen D2L-CLI package is not approved.")?;
-    verify_package(executable, Path::new(manifest), digest)
+    let root = executable
+        .parent()
+        .ok_or("The package executable path is invalid.")?;
+    let approved_root = approval
+        .installation_root
+        .canonicalize()
+        .map_err(|_| "The approved package location is unavailable.")?;
+    if root != approved_root || approval.installation_root != approved_root {
+        return Err("The executable is outside the approved package location.");
+    }
+    verify_package(
+        executable,
+        &approval.manifest_path,
+        &approval.manifest_sha256,
+    )
 }
 
 #[cfg(test)]
@@ -413,8 +452,59 @@ mod tests {
         );
         assert_eq!(
             verify_for_launch(&fixture.exe(), true),
-            Err("This frozen D2L-CLI package is not approved.")
+            Err("No frozen D2L-CLI package has been approved.")
         );
+    }
+
+    #[test]
+    fn production_requires_approval_and_an_exact_frozen_location() {
+        let fixture = Fixture::new();
+        let digest = fixture.write_manifest();
+        let approval = ApprovedFrozen {
+            installation_root: fixture.root.clone(),
+            manifest_path: fixture.manifest.clone(),
+            manifest_sha256: digest.clone(),
+        };
+        let exe = fixture.exe();
+        assert!(verify_for_launch(&exe, false).is_err());
+        assert!(verify_for_launch(&exe, true).is_err());
+        assert_eq!(verify_for_launch_with(&exe, true, Some(&approval)), Ok(()));
+        assert!(verify_for_launch_with(&exe, false, Some(&approval)).is_err());
+
+        let alternate = fixture.parent.join("alternate");
+        fs::create_dir_all(alternate.join("_internal")).unwrap();
+        let alternate = alternate.canonicalize().unwrap();
+        for name in [
+            "d2l.exe",
+            "_internal/python311.dll",
+            "_internal/base_library.zip",
+        ] {
+            fs::copy(fixture.root.join(name), alternate.join(name)).unwrap();
+        }
+        assert!(verify_for_launch_with(&alternate.join("d2l.exe"), true, Some(&approval)).is_err());
+
+        let mut wrong = approval.clone();
+        wrong.installation_root = alternate.canonicalize().unwrap();
+        wrong.manifest_sha256 = "0".repeat(64);
+        assert!(verify_for_launch_with(&alternate.join("d2l.exe"), true, Some(&wrong)).is_err());
+        wrong.manifest_sha256 = digest;
+        assert_eq!(
+            verify_for_launch_with(&alternate.join("d2l.exe"), true, Some(&wrong)),
+            Ok(())
+        );
+
+        fs::write(fixture.root.join("_internal/python311.dll"), b"changed").unwrap();
+        assert!(verify_for_launch_with(&exe, true, Some(&approval)).is_err());
+        fs::copy(
+            alternate.join("_internal/python311.dll"),
+            fixture.root.join("_internal/python311.dll"),
+        )
+        .unwrap();
+        fs::remove_file(&fixture.manifest).unwrap();
+        assert!(verify_for_launch_with(&exe, true, Some(&approval)).is_err());
+        fixture.write_manifest();
+        fs::remove_dir_all(fixture.root.join("_internal")).unwrap();
+        assert!(verify_for_launch_with(&exe, true, Some(&approval)).is_err());
     }
 
     #[test]

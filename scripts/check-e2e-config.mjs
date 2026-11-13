@@ -51,7 +51,9 @@ const scopeA = brightspace.split('pub fn inspect_capabilities')[1]?.split('pub f
 assert.ok(scopeA?.includes('&CAPABILITY_ARGS') && !scopeA.includes('"status"') && !scopeA.includes('parse_status'), 'Scope A inspection must use only the fixed capability command.');
 assert.ok(brightspace.includes('if args != CAPABILITY_ARGS') && brightspace.includes('self.identity == "com.webswe.civildesk.e2e"'), 'Normal builds must reject non-capability process launches.');
 assert.ok(nativeCommands.includes('brightspace_inspect_capabilities') && nativeCommands.includes('#[cfg(not(feature = "notion-mock"))]') && !nativeCommands.includes('brightspace_inspect,'), 'Production inspection must not expose status or a generic command.');
-assert.ok(brightspacePackage.includes('const APPROVED_FROZEN: Option<(&str, &str)> = None;'), 'Frozen package approval must remain disabled.');
+assert.ok(brightspacePackage.includes('const APPROVED_FROZEN: Option<(&str, &str, &str)> = None;'), 'Frozen package approval must remain disabled.');
+assert.ok(brightspacePackage.includes('verify_for_launch_with(executable, configured_frozen, approval.as_ref())') && brightspacePackage.includes('if !configured_frozen || !is_frozen_package(executable)'), 'Production launches must require approved frozen-package mode.');
+assert.ok(brightspace.includes('self.verify_cli(origin, executable, configured_frozen)') && brightspace.includes('self.verify_cli(&origin, &canonical, frozen_package)'), 'Save and launch must share package trust enforcement.');
 const synthetic = read('src-tauri/src/bin/brightspace-synthetic.rs');
 const notionService = read('src-tauri/src/notion/mod.rs');
 const secrets = read('src-tauri/src/notion/secrets.rs');

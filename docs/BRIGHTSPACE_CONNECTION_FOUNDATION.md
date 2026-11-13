@@ -8,8 +8,8 @@ or claims server-confirmed authentication.
 
 ## Adapter boundary
 
-The production inspection surface has four operational Tauri commands:
-`brightspace_configuration`, `brightspace_save_configuration`,
+The production inspection surface has five operational Tauri commands:
+`brightspace_configuration`, `brightspace_execution_policy`, `brightspace_save_configuration`,
 `brightspace_inspect_capabilities`, and `brightspace_cancel`. React supplies a portal and
 executable path only when saving nonsecret settings. It cannot supply a profile, command name, argument
 vector, or child environment to inspection.
@@ -20,7 +20,8 @@ which requires the exact E2E identity and dedicated synthetic executable.
 The shared process launcher rejects every other argument vector in normal builds.
 
 After validating the canonical executable path and its saved SHA-256 fingerprint,
-the production adapter requires the executable filename `d2l.exe`. It runs
+the production adapter requires a compiled approval for the exact frozen package
+at the approved canonical installation directory. It runs
 this exact argument vector directly, without a shell:
 
 ```text
@@ -51,10 +52,11 @@ after the bounded process completes. A saved executable fingerprint is checked
 again immediately before each launch. A file replacement between that check
 and Windows process creation remains a narrow local same-user race; the adapter
 does not claim to contain malicious processes with the same Windows privileges.
-The hash detects changes to the selected file; it does not establish its
-publisher or make an untrusted file safe. Choose and keep `d2l.exe` in a
-directory where untrusted software cannot replace it, review updates before
-re-saving its fingerprint, and avoid shared writable or temporary directories.
+The hash detects changes to the selected file; full-package verification also
+checks every runtime component against the independently approved manifest.
+Neither establishes publisher identity or makes a user-writable installation
+safe. Install the approved package in a controlled directory where untrusted
+software cannot replace it.
 Closing the remaining launch race would require binding verification to the
 actual process image or launching suspended into a Job Object before resuming;
 those are separate Windows process-control changes, not a code-signing
@@ -88,10 +90,13 @@ reinterprets a portal.
 
 Configuration uses the existing SQLite `app_state` table under the key
 `brightspace_connection_v1`. It stores only `portalOrigin`, `executablePath`,
-and `executableSha256`. No schema migration, academic table, credential value,
+`executableSha256`, and the historical `frozenPackage` mode flag. No schema migration, academic table, credential value,
 cookie, or token is added. The file fingerprint is deliberately not returned
 to the frontend. Saving settings does not run the CLI. The user must choose
 **Inspect capabilities** to perform the local check. There is no automatic sync.
+Legacy standalone settings remain stored, but cannot launch or be silently
+promoted to an approved frozen configuration. The Settings controls are disabled
+while this build has no approved frozen package.
 
 ## Capability result shown in Settings
 
@@ -140,13 +145,13 @@ creating duplicate global Calendar events.
 `src-tauri/src/brightspace_package.rs` verifies PyInstaller one-directory
 packages. The approved trust record must be compiled into a reviewed CivilDesk
 build and must name a manifest **outside** the package plus its exact SHA-256.
-The selected path, package contents, and writable SQLite settings cannot supply
-that expected digest. The production approval record is currently empty, so a
-directory containing `_internal` is rejected during configuration and again
-before process launch. Existing standalone launcher settings and the dedicated
-synthetic E2E executable retain their previous behavior. A saved frozen-package
-mode also prevents a future approved package from reverting to executable-only
-checks if `_internal` disappears.
+The record also names the canonical installation directory. The selected path,
+package contents, and writable SQLite settings cannot supply the approval.
+The production approval record is currently empty, so every normal D2L-CLI
+configuration and launch is rejected, including standalone launchers and legacy
+settings. The dedicated synthetic E2E executable remains available only in its
+feature-gated build with the exact E2E application identity. A saved frozen-package
+mode cannot revert to executable-only checks if `_internal` disappears.
 
 The verifier requires a canonical package directory and `d2l.exe` at its root.
 It verifies the manifest digest before parsing, accepts only schema
@@ -155,7 +160,7 @@ checks every listed file's size and SHA-256, and rejects missing, modified, or
 **extra files and directories**. It rejects links and Windows reparse points
 inside the package, including junctions. The manifest is not stored inside the
 package. Failure returns a fixed, sanitized trust error and prevents launch;
-there is no fallback to hashing only `d2l.exe` for a frozen package. The
+there is no fallback to hashing only `d2l.exe`. The
 fixed capability command, validated portal configuration, cleared child
 environment, timeout, output limits, cancellation, and strict JSON parsing
 remain in force.
