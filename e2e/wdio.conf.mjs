@@ -18,6 +18,18 @@ const brightspaceScenario = path.join(e2eDataPaths().data, 'brightspace-scenario
 const binary = path.join(targetDir, 'debug', 'civildesk-e2e.exe');
 const driverPort = 4444;
 let driver;
+function verifiedNativeDriver() {
+  const supplied = process.env.CIVILDESK_E2E_DRIVER_PATH;
+  if (!supplied || !path.isAbsolute(supplied)) throw new Error('An explicitly verified E2E WebDriver path is required.');
+  // Windows' legacy realpath can mix short and long spellings for fresh folders.
+  const resolved = fs.realpathSync.native(supplied);
+  const base = fs.realpathSync.native(process.env.RUNNER_TEMP || os.tmpdir());
+  const parts = path.relative(base, resolved).split(path.sep);
+  if (parts.length !== 2 || !/^civildesk-e2e-webdriver-[a-f0-9]{32}$/.test(parts[0]) || parts[1].toLowerCase() !== 'msedgedriver.exe' || !fs.statSync(resolved).isFile()) {
+    throw new Error('E2E WebDriver must be the verified copy in an isolated test directory.');
+  }
+  return resolved;
+}
 // The WebdriverIO logger opens its file before any hook runs, so the folders must exist at load time.
 fs.mkdirSync(path.join(results, 'wdio-logs'), { recursive: true });
 fs.mkdirSync(path.join(results, 'screenshots'), { recursive: true });
@@ -79,7 +91,7 @@ export const config = {
     process.env.CIVILDESK_NOTION_MOCK_URL = 'http://127.0.0.1:' + MOCK_PORT;
     const exe = path.join(os.homedir(), '.cargo', 'bin', process.platform === 'win32' ? 'tauri-driver.exe' : 'tauri-driver');
     const log = fs.openSync(path.join(results, 'tauri-driver.log'), 'a');
-    driver = spawn(exe, [], { stdio: ['ignore', log, log] });
+    driver = spawn(exe, ['--native-driver', verifiedNativeDriver()], { stdio: ['ignore', log, log] });
     driver.on('error', err => { console.error('tauri-driver failed to start:', err); process.exit(1); });
     await waitForPort(driverPort, 20000);
   }),

@@ -91,9 +91,13 @@ for (const f of srcFiles) assert.ok(!/civildesk\.e2e|webdriver|wdio/i.test(read(
 const workflow = '.github/workflows/e2e-windows.yml';
 if (existsSync(path.join(root, workflow))) {
   const text = read(workflow);
+  const driverSetup = read('e2e/scripts/setup-msedgedriver.ps1');
   assert.ok(/workflow_dispatch/.test(text) && !/^\s*(push|pull_request|schedule):/m.test(text), 'E2E workflow must be manual only.');
   assert.ok(/--no-bundle/.test(text) && /tauri\.e2e\.conf\.json/.test(text));
   assert.ok(/--features notion-mock/.test(text), 'E2E workflow must build the Notion mock feature.');
+  assert.ok(text.includes('cargo install tauri-driver --version 2.1.0 --locked') && text.includes('./e2e/scripts/setup-msedgedriver.ps1') && !/cargo install --git|msedgedriver-tool|e2e-drivers-/.test(text), 'E2E driver setup must use the pinned tauri-driver and official acquisition script.');
+  assert.ok(driverSetup.includes('https://msedgedriver.microsoft.com/$runtimeVersion/edgedriver_win64.zip') && driverSetup.includes('Get-AuthenticodeSignature') && driverSetup.includes('$driverVersion -cne $runtimeVersion') && driverSetup.includes('CIVILDESK_E2E_DRIVER_PATH=$driver'), 'E2E driver acquisition must verify Microsoft signature and exact WebView2 version.');
+  assert.ok(wdio.includes("['--native-driver', verifiedNativeDriver()]") && wdio.includes('CIVILDESK_E2E_DRIVER_PATH'), 'The E2E harness must use only an explicitly verified test driver.');
   assert.ok(!/tauri\.release\.conf|tauri\.acceptance\.conf|upload-artifact[\s\S]{0,200}nsis/i.test(text), 'E2E workflow must not touch release or Acceptance artifacts.');
 }
 // Notion mock isolation: no production/Acceptance/CI build path may enable the mock feature or supply a mock endpoint.

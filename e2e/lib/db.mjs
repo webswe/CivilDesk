@@ -4,10 +4,9 @@
 // hot journal behind. Reading such a file correctly needs a connection that may roll it back. Therefore this module:
 //   1. refuses any path that is not exactly the E2E database (never production or Acceptance),
 //   2. opens that disposable file read-write so SQLite can recover it,
-//   3. uses SQLite's Online Backup API to write a consistent snapshot into a private temp folder,
+//   3. uses SQLite's Online Backup API to write a consistent snapshot into a private folder beside the disposable E2E database,
 //   4. runs every check against the snapshot, and always removes only the folder it created.
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync, backup } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
@@ -29,7 +28,7 @@ export function expectedSchemaVersion() {
 export async function inspectDatabase(file, env = process.env) {
   const database = assertE2eDatabase(file, env);
   if (!fs.existsSync(database)) return { exists: false };
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'civildesk-e2e-snapshot-'));
+  const dir = fs.mkdtempSync(path.join(path.dirname(database), 'civildesk-e2e-snapshot-'));
   const snapshotPath = path.join(dir, 'snapshot.sqlite3');
   let source;
   let snapshot;

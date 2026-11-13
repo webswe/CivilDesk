@@ -11,7 +11,7 @@ import { e2eDataPaths } from './guard.mjs';
 let root;
 let env;
 let database;
-const snapshotDirs = () => fs.readdirSync(os.tmpdir()).filter(n => n.startsWith('civildesk-e2e-snapshot-')).sort();
+const snapshotDirs = () => fs.readdirSync(path.dirname(database)).filter(n => n.startsWith('civildesk-e2e-snapshot-')).sort();
 const sha = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
 beforeEach(() => {
