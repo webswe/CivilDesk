@@ -22,12 +22,25 @@ fn main() {
     {
         std::process::exit(7);
     }
-    let scenario = std::env::var("CIVILDESK_BRIGHTSPACE_SCENARIO_FILE")
-        .ok()
+    let scenario_path = std::env::var("CIVILDESK_BRIGHTSPACE_SCENARIO_FILE").ok();
+    let scenario = scenario_path
+        .as_ref()
         .and_then(|path| std::fs::read_to_string(path).ok())
         .unwrap_or_else(|| "missing".into());
     let scenario = scenario.trim();
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if let Some(path) = scenario_path {
+        let log = std::path::Path::new(&path).with_file_name("brightspace-invocations.jsonl");
+        let record = json!({"args":args});
+        let result = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log)
+            .and_then(|mut file| writeln!(file, "{record}"));
+        if result.is_err() {
+            std::process::exit(8);
+        }
+    }
     let capability = ["auth", "capabilities", "--json", "--contract-version", "1"];
     let status = ["auth", "status", "--json", "--contract-version", "1"];
     let courses = ["courses", "list", "--json"];

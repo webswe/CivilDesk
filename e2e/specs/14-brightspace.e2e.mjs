@@ -22,7 +22,10 @@ const invoke = async (command, args = {}) => {
   }, command, args);
   return JSON.parse(json);
 };
-const inspect = async () => (await invoke('brightspace_inspect')).value;
+const inspect = async () => (await invoke('brightspace_inspect_synthetic_status')).value;
+const inspectCapabilities = async () => (await invoke('brightspace_inspect_capabilities')).value;
+const invocationFile = path.join(e2eDataPaths().data, 'brightspace-invocations.jsonl');
+const invocations = () => fs.existsSync(invocationFile) ? fs.readFileSync(invocationFile, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
 
 describe('Brightspace connection foundation (synthetic executable only)', () => {
   before(async () => { await onboard(); await openSettings(); scenario('missing'); });
@@ -45,15 +48,27 @@ describe('Brightspace connection foundation (synthetic executable only)', () => 
     expect(state).toMatchObject({ state: 'authentication_required', profileId: 'civildesk-e2e-synthetic', cliAvailable: true, cliCompatible: true, liveVerified: false });
     await $('#brightspace-portal').setValue(origin);
     await $('#brightspace-executable').setValue(executable);
-    await $('button=Inspect status').click();
-    await expect(badge()).toHaveText('Authentication required');
+    await $('button=Inspect capabilities').click();
+    await expect(badge()).toHaveText('CLI capabilities verified');
+  });
+
+  it('Scope A invokes only the exact capability command on success and failure', async () => {
+    fs.writeFileSync(invocationFile, '');
+    scenario('missing');
+    expect((await inspectCapabilities()).state).toBe('capabilities_verified');
+    expect(invocations()).toEqual([{ args: ['auth', 'capabilities', '--json', '--contract-version', '1'] }]);
+    fs.writeFileSync(invocationFile, '');
+    scenario('unsupported');
+    expect((await inspectCapabilities()).state).toBe('cli_incompatible');
+    expect(invocations()).toEqual([{ args: ['auth', 'capabilities', '--json', '--contract-version', '1'] }]);
+    scenario('missing');
   });
 
   it('shows a stored synthetic credential as unverified, including after restart', async () => {
     scenario('present');
     expect((await inspect()).state).toBe('credential_present_unverified');
-    await $('button=Inspect status').click();
-    await expect(badge()).toHaveText('Credential stored, unverified');
+    await $('button=Inspect capabilities').click();
+    await expect(badge()).toHaveText('CLI capabilities verified');
     expect(await $('.brightspace-panel').getText()).not.toContain('Connected');
     await restartApp(); await openSettings();
     expect((await inspect()).state).toBe('credential_present_unverified');
@@ -83,7 +98,7 @@ describe('Brightspace connection foundation (synthetic executable only)', () => 
   it('cancels a running status check and cleans up its synthetic child', async () => {
     scenario('timeout');
     const result = await browser.executeAsync(done => {
-      const pending = window.__TAURI_INTERNALS__.invoke('brightspace_inspect');
+      const pending = window.__TAURI_INTERNALS__.invoke('brightspace_inspect_synthetic_status');
       setTimeout(() => { void window.__TAURI_INTERNALS__.invoke('brightspace_cancel'); }, 300);
       pending.then(value => done(value), error => done({ state: 'error', message: String(error) }));
     });

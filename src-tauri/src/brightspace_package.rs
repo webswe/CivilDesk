@@ -489,11 +489,22 @@ mod tests {
         };
         let manifest = std::env::var("CIVILDESK_FROZEN_MANIFEST_TEST_PATH").unwrap();
         let root = Path::new(&root).canonicalize().unwrap();
+        let manifest_value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+        assert_eq!(
+            manifest_value["source_commit"],
+            "3ce164827ce10e6a311d4c4bdf6ecc9f7624c60f"
+        );
+        assert_eq!(manifest_value["files"].as_object().unwrap().len(), 306);
+        assert_eq!(
+            hash_file(&root.join("d2l.exe")).unwrap(),
+            "fa06c5f1ab284130184715eb8b3ac04a61c5d07caa77ed44acb3f13bc1c46243"
+        );
         assert_eq!(
             verify_package(
                 &root.join("d2l.exe"),
                 Path::new(&manifest),
-                "4068d995c1db6f8fe3c874b6e4dbfd9dc95e3c66335b27a5b49d35b6fa2d705e",
+                "7c09cc6f3941ff86d20e779a2275269ba0f9a47cac28939779f3cc0108cf29db",
             ),
             Ok(())
         );

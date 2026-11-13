@@ -45,6 +45,13 @@ assert.deepEqual(json('src-tauri/capabilities/default.json').permissions, ['core
 const rustFiles = readdirSync(path.join(root, 'src-tauri/src')).filter(f => f.endsWith('.rs'));
 for (const f of rustFiles) if (f !== 'brightspace.rs') assert.ok(!/E2E|webdriver|wdio/i.test(read('src-tauri/src/' + f)), f + ' contains test-only code.');
 const brightspace = read('src-tauri/src/brightspace.rs');
+const brightspacePackage = read('src-tauri/src/brightspace_package.rs');
+const nativeCommands = read('src-tauri/src/lib.rs');
+const scopeA = brightspace.split('pub fn inspect_capabilities')[1]?.split('pub fn inspect_synthetic_status')[0];
+assert.ok(scopeA?.includes('&CAPABILITY_ARGS') && !scopeA.includes('"status"') && !scopeA.includes('parse_status'), 'Scope A inspection must use only the fixed capability command.');
+assert.ok(brightspace.includes('if args != CAPABILITY_ARGS') && brightspace.includes('self.identity == "com.webswe.civildesk.e2e"'), 'Normal builds must reject non-capability process launches.');
+assert.ok(nativeCommands.includes('brightspace_inspect_capabilities') && nativeCommands.includes('#[cfg(not(feature = "notion-mock"))]') && !nativeCommands.includes('brightspace_inspect,'), 'Production inspection must not expose status or a generic command.');
+assert.ok(brightspacePackage.includes('const APPROVED_FROZEN: Option<(&str, &str)> = None;'), 'Frozen package approval must remain disabled.');
 const synthetic = read('src-tauri/src/bin/brightspace-synthetic.rs');
 const notionService = read('src-tauri/src/notion/mod.rs');
 const secrets = read('src-tauri/src/notion/secrets.rs');

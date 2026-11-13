@@ -4,11 +4,11 @@ import { BrightspaceSettings } from './BrightspaceSettings';
 import * as service from './services/brightspace';
 
 vi.mock('./services/brightspace', () => ({
-  brightspaceConfiguration: vi.fn(), brightspaceSaveConfiguration: vi.fn(), brightspaceInspect: vi.fn(), brightspaceCancel: vi.fn(),
+  brightspaceConfiguration: vi.fn(), brightspaceSaveConfiguration: vi.fn(), brightspaceInspectCapabilities: vi.fn(), brightspaceCancel: vi.fn(),
 }));
 const configuration = vi.mocked(service.brightspaceConfiguration);
 const save = vi.mocked(service.brightspaceSaveConfiguration);
-const inspect = vi.mocked(service.brightspaceInspect);
+const inspect = vi.mocked(service.brightspaceInspectCapabilities);
 const base = { profileId: 'civildesk-dev', portalOrigin: 'https://learn.example.edu', executablePath: 'C:\\Tools\\d2l.exe', cliAvailable: true, cliCompatible: true, liveVerified: false };
 
 beforeEach(() => { vi.resetAllMocks(); configuration.mockResolvedValue(null); });
@@ -40,25 +40,23 @@ it('saves only portal and executable fields', async () => {
 });
 
 it.each([
-  ['authentication_required', 'Authentication required'],
-  ['credential_present_unverified', 'Credential stored, unverified'],
-  ['portal_mismatch', 'Portal mismatch'],
-  ['credential_error', 'Credential or storage error'],
+  ['capabilities_verified', 'CLI capabilities verified'],
   ['cli_incompatible', 'CLI incompatible'],
   ['cli_unavailable', 'CLI unavailable'],
-] as const)('presents %s without claiming a live connection', async (state, label) => {
-  inspect.mockResolvedValueOnce({ ...base, state, message: 'Synthetic status.' });
+] as const)('presents %s without claiming a credential or live connection', async (state, label) => {
+  inspect.mockResolvedValueOnce({ ...base, state, message: 'CLI capabilities verified — credentials and account connection not checked.' });
   render(<BrightspaceSettings />);
-  fireEvent.click(screen.getByRole('button', { name: 'Inspect status' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Inspect capabilities' }));
   expect(await screen.findByText(label)).toBeInTheDocument();
-  expect(screen.getByText(/Live verification is unavailable/)).toBeInTheDocument();
+  expect(screen.getByText(/Capability inspection does not check credentials/)).toBeInTheDocument();
   expect(screen.queryByText('Connected')).toBeNull();
+  expect(screen.queryByText('Credential stored, unverified')).toBeNull();
 });
 
 it('shows a safe error when the inspection fails', async () => {
   inspect.mockRejectedValueOnce(new Error('SYNTHETIC_SECRET'));
   render(<BrightspaceSettings />);
-  fireEvent.click(screen.getByRole('button', { name: 'Inspect status' }));
-  expect(await screen.findByRole('alert')).toHaveTextContent('Brightspace status could not be inspected.');
+  fireEvent.click(screen.getByRole('button', { name: 'Inspect capabilities' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Brightspace capabilities could not be inspected.');
   expect(document.body.textContent).not.toContain('SYNTHETIC_SECRET');
 });

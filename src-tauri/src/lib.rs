@@ -50,14 +50,37 @@ fn brightspace_save_configuration(
 }
 
 #[tauri::command]
-async fn brightspace_inspect(app: tauri::AppHandle) -> Result<brightspace::Inspection, String> {
+async fn brightspace_inspect_capabilities(
+    app: tauri::AppHandle,
+) -> Result<brightspace::Inspection, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let db = app.state::<RuntimeState>();
         let service = app.state::<BrightspaceState>();
-        Ok(service.0.inspect(db.database()?))
+        Ok(service.0.inspect_capabilities(db.database()?))
     })
     .await
-    .map_err(|_| "Brightspace status could not be inspected.".to_string())?
+    .map_err(|_| "Brightspace capabilities could not be inspected.".to_string())?
+}
+
+#[tauri::command]
+async fn brightspace_inspect_synthetic_status(
+    app: tauri::AppHandle,
+) -> Result<brightspace::Inspection, String> {
+    #[cfg(feature = "notion-mock")]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            let db = app.state::<RuntimeState>();
+            let service = app.state::<BrightspaceState>();
+            Ok(service.0.inspect_synthetic_status(db.database()?))
+        })
+        .await
+        .map_err(|_| "Synthetic status could not be inspected.".to_string())?
+    }
+    #[cfg(not(feature = "notion-mock"))]
+    {
+        let _ = app;
+        Err("Synthetic status is unavailable.".to_string())
+    }
 }
 
 #[tauri::command]
@@ -973,7 +996,8 @@ pub fn run() {
             notion_selected_sources,
             brightspace_configuration,
             brightspace_save_configuration,
-            brightspace_inspect,
+            brightspace_inspect_capabilities,
+            brightspace_inspect_synthetic_status,
             brightspace_cancel,
             brightspace_course_mode,
             brightspace_courses,

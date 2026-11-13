@@ -19,6 +19,7 @@ const CONTRACT: u8 = 1;
 const STDOUT_LIMIT: usize = 32 * 1024;
 const STDERR_LIMIT: usize = 8 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(5);
+const CAPABILITY_ARGS: [&str; 5] = ["auth", "capabilities", "--json", "--contract-version", "1"];
 const REQUIRED: [&str; 9] = [
     "credential_profiles_v2",
     "origin_binding_v2",
@@ -596,7 +597,145 @@ impl Adapter {
         Ok(())
     }
 
-    pub fn inspect(&self, db: &Database) -> Inspection {
+    /// Scope A never inspects credentials, even when the capability contract succeeds.
+    pub fn inspect_capabilities(&self, db: &Database) -> Inspection {
+        let _guard = match self.in_flight.try_lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                return Inspection::new(
+                    "process_error",
+                    self.profile,
+                    None,
+                    false,
+                    false,
+                    "A Brightspace check is already running.",
+                )
+            }
+        };
+        self.cancelled.store(false, Ordering::SeqCst);
+        let config = match self.load(db) {
+            Ok(Some(config)) => config,
+            Ok(None) => {
+                return Inspection::new(
+                    "not_configured",
+                    self.profile,
+                    None,
+                    false,
+                    false,
+                    "Add a portal and trusted CLI executable.",
+                )
+            }
+            Err(_) => {
+                return Inspection::new(
+                    "configuration_error",
+                    self.profile,
+                    None,
+                    false,
+                    false,
+                    "Brightspace settings could not be read.",
+                )
+            }
+        };
+        if canonical_origin(&config.portal_origin).as_deref() != Ok(config.portal_origin.as_str()) {
+            return Inspection::new(
+                "configuration_error",
+                self.profile,
+                Some(&config),
+                false,
+                false,
+                "Brightspace settings are invalid.",
+            );
+        }
+        let path = PathBuf::from(&config.executable_path);
+        let canonical = match path.canonicalize() {
+            Ok(path) if path.is_file() => path,
+            _ => {
+                return Inspection::new(
+                    "cli_unavailable",
+                    self.profile,
+                    Some(&config),
+                    false,
+                    false,
+                    "The configured D2L-CLI executable is unavailable.",
+                )
+            }
+        };
+        if canonical != path
+            || (self.profile != "civildesk-e2e-synthetic" && !is_cli_executable(&canonical))
+            || self
+                .check_synthetic_boundary(&config.portal_origin, &canonical)
+                .is_err()
+        {
+            return Inspection::new(
+                "cli_untrusted",
+                self.profile,
+                Some(&config),
+                false,
+                false,
+                "The configured executable no longer matches the trusted path.",
+            );
+        }
+        if file_sha256(&canonical).as_deref() != Ok(config.executable_sha256.as_str()) {
+            return Inspection::new(
+                "cli_untrusted",
+                self.profile,
+                Some(&config),
+                false,
+                false,
+                "The configured executable changed. Review and save it again.",
+            );
+        }
+        let output = match self.run(
+            &canonical,
+            &config.executable_sha256,
+            &config.portal_origin,
+            config.frozen_package,
+            &CAPABILITY_ARGS,
+        ) {
+            Ok(output) => output,
+            Err(kind) => {
+                return Inspection::new(
+                    kind,
+                    self.profile,
+                    Some(&config),
+                    true,
+                    false,
+                    process_message(kind),
+                )
+            }
+        };
+        if parse_capabilities(&output).is_err() {
+            return Inspection::new(
+                "cli_incompatible",
+                self.profile,
+                Some(&config),
+                true,
+                false,
+                "This D2L-CLI does not support the required capability contract.",
+            );
+        }
+        Inspection::new(
+            "capabilities_verified",
+            self.profile,
+            Some(&config),
+            true,
+            true,
+            "CLI capabilities verified — credentials and account connection not checked.",
+        )
+    }
+
+    #[cfg(feature = "notion-mock")]
+    pub fn inspect_synthetic_status(&self, db: &Database) -> Inspection {
+        if self.identity != "com.webswe.civildesk.e2e" {
+            return Inspection::new(
+                "cli_untrusted",
+                self.profile,
+                None,
+                false,
+                false,
+                "Synthetic status is unavailable.",
+            );
+        }
         let _guard = match self.in_flight.try_lock() {
             Ok(guard) => guard,
             Err(_) => {
@@ -681,7 +820,7 @@ impl Adapter {
             &config.executable_sha256,
             &config.portal_origin,
             config.frozen_package,
-            &["auth", "capabilities", "--json", "--contract-version", "1"],
+            &CAPABILITY_ARGS,
         ) {
             Ok(output) => output,
             Err(kind) => {
@@ -772,6 +911,13 @@ impl Adapter {
         configured_frozen: bool,
         args: &[&str],
     ) -> Result<Output, &'static str> {
+        // The shared launch boundary is deny-by-default in every normal build.
+        // Only the isolated E2E identity may use its synthetic status/read commands.
+        if args != CAPABILITY_ARGS
+            && !(cfg!(feature = "notion-mock") && self.identity == "com.webswe.civildesk.e2e")
+        {
+            return Err("cli_untrusted");
+        }
         if self.cancelled.load(Ordering::SeqCst) {
             return Err("cancelled");
         }
@@ -800,9 +946,13 @@ impl Adapter {
                 command.env(key, value);
             }
         }
-        command
-            .env("D2L_CLI_PROFILE", self.profile)
-            .env("D2L_CLI_BASE_URL", origin);
+        // Capability discovery does not require selectors. Synthetic status
+        // and reads retain their isolated profile and portal contract.
+        if cfg!(feature = "notion-mock") && self.identity == "com.webswe.civildesk.e2e" {
+            command
+                .env("D2L_CLI_PROFILE", self.profile)
+                .env("D2L_CLI_BASE_URL", origin);
+        }
         if self.identity == "com.webswe.civildesk.e2e" {
             let app_data = std::env::var_os("APPDATA").ok_or("process_error")?;
             let scenario = PathBuf::from(app_data)
@@ -1015,11 +1165,12 @@ fn process_message(kind: &str) -> &'static str {
         "cli_untrusted" => {
             "The D2L-CLI package changed or lacks approval. Review its trusted manifest."
         }
-        "cancelled" => "The Brightspace status check was cancelled.",
-        _ => "D2L-CLI could not complete the status check.",
+        "cancelled" => "The Brightspace CLI check was cancelled.",
+        _ => "D2L-CLI could not complete the check.",
     }
 }
 
+#[cfg(feature = "notion-mock")]
 fn state_message(state: &str) -> &'static str {
     match state {
         "authentication_required" => {
@@ -1299,6 +1450,7 @@ fn parse_capabilities(output: &Output) -> Result<(), ()> {
     Ok(())
 }
 
+#[cfg(any(test, feature = "notion-mock"))]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Status {
@@ -1316,6 +1468,7 @@ struct Status {
     message: String,
 }
 
+#[cfg(any(test, feature = "notion-mock"))]
 fn parse_status(output: &Output, profile: &str, origin: &str) -> Result<&'static str, ()> {
     let v: Status = serde_json::from_slice(&output.stdout).map_err(|_| ())?;
     if v.contract_version != CONTRACT
@@ -1882,9 +2035,9 @@ mod tests {
         assert!(raw.contains("executableSha256"));
         assert!(!raw.contains("cookie") && !raw.contains("token") && !raw.contains("password"));
         std::fs::remove_file(&exe).unwrap();
-        assert_eq!(adapter.inspect(&db).state, "cli_unavailable");
+        assert_eq!(adapter.inspect_capabilities(&db).state, "cli_unavailable");
         std::fs::write(&exe, b"CHANGED_SYNTHETIC_NOT_EXECUTED").unwrap();
-        assert_eq!(adapter.inspect(&db).state, "cli_untrusted");
+        assert_eq!(adapter.inspect_capabilities(&db).state, "cli_untrusted");
         std::fs::remove_file(exe).unwrap();
         std::fs::remove_dir(dir).unwrap();
     }
@@ -1931,6 +2084,153 @@ mod tests {
             ),
             Err("cli_untrusted")
         ));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(not(feature = "notion-mock"))]
+    #[test]
+    fn scope_a_rejects_every_other_command_before_process_launch() {
+        let adapter = Adapter::new("com.webswe.civildesk.dev").unwrap();
+        let missing = Path::new("C:\\synthetic-missing\\d2l.exe");
+        for args in [
+            vec!["auth", "status", "--json", "--contract-version", "1"],
+            vec!["auth", "login"],
+            vec!["courses", "list", "--json"],
+            vec!["assignments", "list", "--json"],
+            vec!["grades", "list", "--json"],
+            vec!["announcements", "list", "--json"],
+            vec!["auth", "capabilities", "--json", "--contract-version", "2"],
+            vec![
+                "auth",
+                "capabilities",
+                "--json",
+                "--contract-version",
+                "1",
+                "--extra",
+            ],
+        ] {
+            assert_eq!(
+                adapter
+                    .run(missing, "", "https://synthetic.example.test", false, &args)
+                    .err(),
+                Some("cli_untrusted"),
+                "{args:?}"
+            );
+        }
+    }
+
+    #[cfg(all(windows, not(feature = "notion-mock")))]
+    #[test]
+    fn capability_inspection_runs_only_the_fixed_credential_free_command() {
+        let dir = std::env::temp_dir().join(format!(
+            "civildesk-scope-a-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&dir).unwrap();
+        let source = dir.join("fixture.rs");
+        let exe = dir.join("d2l.exe");
+        std::fs::write(
+            &source,
+            r#"
+            use std::{env, fs, io::Write};
+            fn main() {
+                let dir = env::current_exe().unwrap().parent().unwrap().to_path_buf();
+                let args: Vec<String> = env::args().skip(1).collect();
+                let mut log = fs::OpenOptions::new().create(true).append(true)
+                    .open(dir.join("invocations.txt")).unwrap();
+                writeln!(log, "{}", args.join(" ")).unwrap();
+                if args != ["auth", "capabilities", "--json", "--contract-version", "1"] {
+                    std::process::exit(99);
+                }
+                if env::var_os("D2L_CLI_PROFILE").is_some()
+                    || env::var_os("D2L_CLI_BASE_URL").is_some() {
+                    std::process::exit(98);
+                }
+                print!("{}", fs::read_to_string(dir.join("response.json")).unwrap());
+                let code = fs::read_to_string(dir.join("exit.txt")).unwrap();
+                std::process::exit(code.trim().parse().unwrap());
+            }
+            "#,
+        )
+        .unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "-o"])
+            .arg(&exe)
+            .arg(&source)
+            .output()
+            .unwrap();
+        assert!(
+            compiled.status.success(),
+            "{}",
+            String::from_utf8_lossy(&compiled.stderr)
+        );
+        let db = Database(Mutex::new(Connection::open_in_memory().unwrap()));
+        db.0.lock()
+            .unwrap()
+            .execute(
+                "CREATE TABLE app_state(key TEXT PRIMARY KEY,value TEXT NOT NULL)",
+                [],
+            )
+            .unwrap();
+        let adapter = Adapter::new("com.webswe.civildesk.dev").unwrap();
+        adapter
+            .save(&db, "https://synthetic.example.test", exe.to_str().unwrap())
+            .unwrap();
+        let response = serde_json::json!({
+            "contract_version":1,"capabilities":REQUIRED,"error_code":null,"message":"Available."
+        });
+        std::fs::write(dir.join("response.json"), response.to_string()).unwrap();
+        std::fs::write(dir.join("exit.txt"), "0").unwrap();
+        assert_eq!(
+            adapter.inspect_capabilities(&db).state,
+            "capabilities_verified"
+        );
+        std::fs::write(
+            dir.join("response.json"),
+            serde_json::json!({
+                "contract_version":2,"capabilities":[],"error_code":"unsupported_contract",
+                "message":"Unsupported."
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(dir.join("exit.txt"), "2").unwrap();
+        assert_eq!(adapter.inspect_capabilities(&db).state, "cli_incompatible");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("invocations.txt")).unwrap(),
+            "auth capabilities --json --contract-version 1\nauth capabilities --json --contract-version 1\n"
+        );
+        let raw: String =
+            db.0.lock()
+                .unwrap()
+                .query_row("SELECT value FROM app_state WHERE key=?1", [KEY], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+        let mut stored: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        stored["portalOrigin"] = serde_json::json!("http://synthetic.example.test");
+        db.0.lock()
+            .unwrap()
+            .execute(
+                "UPDATE app_state SET value=?1 WHERE key=?2",
+                rusqlite::params![stored.to_string(), KEY],
+            )
+            .unwrap();
+        assert_eq!(
+            adapter.inspect_capabilities(&db).state,
+            "configuration_error"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("invocations.txt"))
+                .unwrap()
+                .lines()
+                .count(),
+            2
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
