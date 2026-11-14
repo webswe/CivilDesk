@@ -56,7 +56,8 @@ describe('engineering (real application)', () => {
 
   it('converts the challenge into an engineering project', async () => {
     await button('Create project from challenge').click();
-    await expect($('//button[normalize-space(.)="Create project from challenge"]')).toBeDisabled();
+    await expect($('//h1[normalize-space(.)="Draft a small utility enclosure"]')).toBeDisplayed();
+    await expect($('//span[normalize-space(.)="LINKED CHALLENGES"]')).toBeDisplayed();
     await openEngineering('Projects');
     await expect($('//button[contains(@class,"project-title")]')).toBeDisplayed();
   });

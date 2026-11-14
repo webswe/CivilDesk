@@ -8,7 +8,7 @@ import type { ProjectsData } from './services/projects';
 const noop = async () => {};
 const data = (automatic: boolean): ChallengeData => ({ challenges: structuredClone(library), versions: structuredClone(library), settings: { automatic, tracks: ['AutoCAD', 'Civil 3D', 'Revit'], difficulties: ['Beginner', 'Intermediate', 'Advanced'], weeklyCount: 1 }, assignments: [], progress: [], evidence: [], pathways: [], projects: [] });
 const projects = { projects: [] } as unknown as ProjectsData;
-const page = (value: ChallengeData) => render(<ChallengesPage data={value} projects={projects} refresh={noop} saveSettings={noop} assign={noop} act={noop} evidence={noop} removeEvidence={noop} link={noop} createProject={noop} />);
+const page = (value: ChallengeData, options: Partial<Parameters<typeof ChallengesPage>[0]> = {}) => render(<ChallengesPage data={value} projects={projects} refresh={noop} saveSettings={noop} assign={noop} act={noop} evidence={noop} removeEvidence={noop} link={noop} createProject={async () => 'project-1'} {...options}/>);
 
 describe('weekly challenge board', () => {
   beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(2026, 10, 4, 10, 0)); });
@@ -43,5 +43,19 @@ describe('weekly challenge board', () => {
     expect(screen.getByRole('status')).toHaveTextContent(/Every criterion is checked/);
     expect(screen.getByRole('button', { name: 'Mark completed' })).toBeEnabled();
     expect(screen.getByText(`${all.length} of ${all.length} criteria checked`)).toBeTruthy();
+  });
+
+  it('opens the linked project and its case study without exposing the evidence path', () => {
+    const value = data(false); const challenge = value.challenges[0]!;
+    value.projects = [{ challengeId: challenge.id, projectId: 'project-1', createdFromChallenge: false }];
+    value.evidence = [{ id: 'file-1', challengeId: challenge.id, displayName: 'drawing.dwg', path: 'C:\\Private\\drafts\\drawing.dwg', category: 'Drawing', addedAtMs: 1, missing: false }];
+    const openProject = vi.fn();
+    page(value, { initialChallengeId: challenge.id, projects: { ...projects, projects: [{ id: 'project-1', title: 'Site drawing' }] } as ProjectsData, openProject });
+    expect(screen.getAllByText('Site drawing')).toHaveLength(2);
+    expect(screen.queryByText(/C:\\Private/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Open workspace' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open case study' }));
+    expect(openProject).toHaveBeenNthCalledWith(1, 'project-1');
+    expect(openProject).toHaveBeenNthCalledWith(2, 'project-1', 'Portfolio');
   });
 });

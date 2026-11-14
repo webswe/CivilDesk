@@ -27,6 +27,12 @@
 .challenge-file { display: flex; justify-content: space-between; gap: 8px; border-top: 1px solid #54414c; padding-top: 9px; min-width: 0; }
 .challenge-file span,.challenge-file small { overflow-wrap: anywhere; }
 .challenge-file small { display: block; }
+.challenge-project-links,.challenge-project-link { display: grid; gap: 8px; margin-top: 12px; }
+.challenge-project-links > div,.challenge-project-link { padding-top: 10px; border-top: 1px solid #54414c; }
+.challenge-project-links strong,.challenge-project-link strong { font-size: 12px; }
+.challenge-project-link span { color: #b9a9b0; font-size: 11px; }
+.challenge-project-link .text-link { justify-self: start; }
+.project-overview .linked-challenges-card { grid-column: 1 / -1; min-height: 0; }
 .challenge-status { background: #4b3743; color: #efcbd3; padding: 8px 12px; border-radius: 999px; white-space: nowrap; }
 .challenge-page .check-row { display: inline-flex; flex-direction: row; align-items: center; gap: 9px; margin: 6px 15px 6px 0; font-size: 12px; }
 .challenge-page .check-row input { width: 16px; height: 16px; accent-color: #c58d9b; }
