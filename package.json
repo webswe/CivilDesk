@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "check:e2e-isolation": "node scripts/check-e2e-config.mjs",
+    "check:protected-install": "node scripts/check-protected-install.mjs",
     "tauri": "node scripts/tauri.mjs",
     "check:dev-config": "node scripts/check-dev-config.mjs"
   },

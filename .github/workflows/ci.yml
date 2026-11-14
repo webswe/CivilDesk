@@ -18,6 +18,13 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run check:e2e-isolation
+      - run: npm run check:protected-install
+      - run: node scripts/lib/frozen-package-verifier.node-test.mjs
+      - shell: pwsh
+        run: |
+          ./scripts/test-protected-acl.ps1
+          ./scripts/test-offline-policy.ps1
+          ./scripts/test-installation-transition.ps1
       - run: npm test
       - run: npm run build
   native:
