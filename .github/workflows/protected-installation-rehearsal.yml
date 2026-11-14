@@ -1,8 +1,13 @@
 name: Disposable protected installation rehearsal
+# This file must be installed and protected on main before workflow_dispatch can run.
+# A verification-branch push cannot start this privileged job.
 on:
-  push:
-    branches:
-      - verification/scope-a-installation-rehearsal
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Reviewed CivilDesk commit to build and install on a disposable runner
+        required: true
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -10,28 +15,64 @@ concurrency:
   cancel-in-progress: false
 jobs:
   rehearsal:
-    if: github.repository == 'webswe/CivilDesk' && github.ref == 'refs/heads/verification/scope-a-installation-rehearsal'
-    runs-on: windows-latest
+    if: github.repository == 'webswe/CivilDesk' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    environment: scope-a-installation-rehearsal
+    runs-on: windows-2025
     timeout-minutes: 120
     env:
       CI: 'true'
       CARGO_TARGET_DIR: ${{ github.workspace }}\src-tauri\target\rehearsal
     steps:
-      - uses: actions/checkout@v4
+      # Runs before checkout or any externally sourced action. Environment approval
+      # and its owner-managed SHA variable are required before this job starts.
+      - name: Validate authorization and disposable runner
+        shell: pwsh
+        env:
+          REVIEWED_SOURCE_SHA: ${{ inputs.source_sha }}
+          APPROVED_SOURCE_SHA: ${{ vars.CIVILDESK_SCOPE_A_REHEARSAL_APPROVED_SHA }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_ACTIONS -cne 'true' -or $env:GITHUB_REPOSITORY -cne 'webswe/CivilDesk' -or
+              $env:GITHUB_EVENT_NAME -cne 'workflow_dispatch' -or $env:GITHUB_REF -cne 'refs/heads/main' -or
+              $env:GITHUB_WORKFLOW_SHA -cne $env:GITHUB_SHA -or
+              $env:RUNNER_OS -cne 'Windows' -or $env:RUNNER_ARCH -cne 'X64' -or
+              $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or
+              $env:REVIEWED_SOURCE_SHA -cnotmatch '^[0-9a-f]{40}$' -or
+              $env:APPROVED_SOURCE_SHA -cnotmatch '^[0-9a-f]{40}$' -or
+              $env:REVIEWED_SOURCE_SHA -cne $env:APPROVED_SOURCE_SHA) {
+            throw 'Owner authorization, trusted workflow ref, or disposable runner check failed.'
+          }
+          'Preflight passed for one reviewed source SHA on a GitHub-hosted Windows X64 runner.'
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ inputs.source_sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - name: Check exact checkout before dependencies
+        shell: pwsh
+        env:
+          APPROVED_SOURCE_SHA: ${{ vars.CIVILDESK_SCOPE_A_REHEARSAL_APPROVED_SHA }}
+        run: ./scripts/rehearsal/provenance.ps1 -ExpectedSha $env:APPROVED_SOURCE_SHA -Phase checkout
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
-          cache: npm
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.11'
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target/rehearsal
-      - run: npm ci
+      - name: Verify preinstalled Windows Rust toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $hostTriple = (rustc -vV | Select-String '^host:').ToString().Split(':',2)[1].Trim()
+          if ($hostTriple -cne 'x86_64-pc-windows-msvc') { throw 'Unexpected Rust target.' }
+          rustc -vV
+          cargo --version
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+      - name: Recheck source after dependency installation
+        shell: pwsh
+        env:
+          APPROVED_SOURCE_SHA: ${{ vars.CIVILDESK_SCOPE_A_REHEARSAL_APPROVED_SHA }}
+        run: ./scripts/rehearsal/provenance.ps1 -ExpectedSha $env:APPROVED_SOURCE_SHA -Phase dependencies
       - run: npm run check:protected-install
       - run: node scripts/check-protected-ci.mjs
       - run: node scripts/rehearsal/check-workflow.mjs
@@ -39,6 +80,13 @@ jobs:
         run: ./scripts/test-protected-installer-metadata.ps1
       - name: Build exact protected NSIS installer in this job
         run: npm run tauri build -- --bundles nsis --config src-tauri/tauri.protected.conf.json
+      - name: Recheck source after build
+        shell: pwsh
+        env:
+          APPROVED_SOURCE_SHA: ${{ vars.CIVILDESK_SCOPE_A_REHEARSAL_APPROVED_SHA }}
+        run: ./scripts/rehearsal/provenance.ps1 -ExpectedSha $env:APPROVED_SOURCE_SHA -Phase build
       - name: Rehearse installation on disposable runner
         shell: pwsh
-        run: ./scripts/rehearsal/run.ps1 -SourceSha $env:GITHUB_SHA -TargetDirectory $env:CARGO_TARGET_DIR
+        env:
+          APPROVED_SOURCE_SHA: ${{ vars.CIVILDESK_SCOPE_A_REHEARSAL_APPROVED_SHA }}
+        run: ./scripts/rehearsal/run.ps1 -SourceSha $env:APPROVED_SOURCE_SHA -TargetDirectory $env:CARGO_TARGET_DIR

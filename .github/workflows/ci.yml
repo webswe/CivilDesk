@@ -20,6 +20,9 @@ jobs:
       - run: npm run check:e2e-isolation
       - run: npm run check:protected-install
       - run: node scripts/check-protected-ci.mjs
+      - run: node scripts/rehearsal/check-workflow.mjs
+      - shell: pwsh
+        run: ./scripts/rehearsal/test-local.ps1
       - run: node scripts/lib/frozen-package-verifier.node-test.mjs
       - shell: pwsh
         run: |
