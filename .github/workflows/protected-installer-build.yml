@@ -1,0 +1,43 @@
+name: Protected NSIS build (Windows, no installation)
+on:
+  push:
+    branches:
+      - verification/scope-a-protected-installation-foundation
+permissions:
+  contents: read
+concurrency:
+  group: protected-nsis-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  protected-installer:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      CI: 'true'
+      CARGO_TARGET_DIR: ${{ github.workspace }}\src-tauri\target\protected
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target/protected
+      - run: npm ci
+      - run: node scripts/check-protected-ci.mjs
+      - run: npm run check:protected-install
+      - shell: pwsh
+        run: ./scripts/test-protected-installer-metadata.ps1
+      - name: Build protected per-machine NSIS installer only
+        run: npm run tauri build -- --bundles nsis --config src-tauri/tauri.protected.conf.json
+      - name: Verify generated installer and record build metadata
+        shell: pwsh
+        run: |
+          ./scripts/verify-protected-installer.ps1 `
+            -SourceSha $env:GITHUB_SHA `
+            -TargetDirectory $env:CARGO_TARGET_DIR `
+            -EvidenceDirectory (Join-Path $env:GITHUB_WORKSPACE 'src-tauri/target/protected-evidence')
