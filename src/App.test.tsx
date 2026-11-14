@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import App from './App';
+import { localDate } from './domain/scheduling';
+import { associateTask, loadProjects, saveMilestone, saveProject } from './services/projects';
+import { saveTask } from './services/workspace';
 
 describe('first-run workspace', () => {
   beforeEach(() => localStorage.clear());
@@ -153,5 +156,28 @@ describe('first-run workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Achievements' }));
     expect(await screen.findByRole('heading', { name: 'Achievements' })).toBeInTheDocument();
     expect(within(screen.getByRole('navigation', { name: 'Main navigation' })).getByRole('button', { name: 'Pip' })).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('navigates from browser-preview Calendar to the existing task and milestone and back', async () => {
+    const id=crypto.randomUUID(), taskId=crypto.randomUUID(), milestoneId=crypto.randomUUID(), today=localDate();
+    await saveProject({id,title:'Navigation project',description:'',discipline:'Civil drafting',category:'',projectType:'Educational',software:[],startDate:null,targetDate:null,status:'Planning',priority:null,createdAtMs:0,updatedAtMs:0,completedAtMs:null,portfolioCandidate:false,portfolioSummary:'',objectives:'',contributions:'',skills:'',decisions:'',lessons:''});
+    await saveTask({id:taskId,title:'Navigation drawing task',description:'',category:'Engineering',priority:'normal',dueDate:today,dueTime:null,subtasks:[],reminderOffsetMinutes:null});
+    await associateTask(taskId,id);
+    await saveMilestone({id:milestoneId,projectId:id,title:'Navigation milestone',description:'',targetDate:today,completedAtMs:null,createdAtMs:0,updatedAtMs:0});
+    const before=await loadProjects();
+    await enter('Taylor');
+    fireEvent.click(screen.getByRole('button',{name:'Calendar'}));
+    fireEvent.click(screen.getByRole('button',{name:'Week'}));
+    fireEvent.click(await screen.findByRole('button',{name:'Open project for Navigation drawing task'}));
+    expect(await screen.findByRole('heading',{name:'Navigation project'})).toBeInTheDocument();
+    expect(screen.getByRole('tab',{name:'Tasks'})).toHaveAttribute('aria-selected','true');
+    expect(document.activeElement?.id).toBe('project-tasks-'+taskId);
+    fireEvent.click(screen.getByRole('button',{name:'Back to Calendar'}));
+    expect(screen.getByRole('button',{name:'Week'})).toHaveAttribute('aria-pressed','true');
+    expect(screen.getByRole('button',{name:'Open project for Navigation drawing task'})).toHaveFocus();
+    fireEvent.click(screen.getByRole('button',{name:'Open project for Navigation milestone'}));
+    expect(await screen.findByRole('tab',{name:'Milestones'})).toHaveAttribute('aria-selected','true');
+    expect(document.activeElement?.id).toBe('project-milestones-'+milestoneId);
+    expect(await loadProjects()).toEqual(before);
   });
 });

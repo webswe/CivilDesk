@@ -33,6 +33,8 @@
 .challenge-project-link span { color: #b9a9b0; font-size: 11px; }
 .challenge-project-link .text-link { justify-self: start; }
 .project-overview .linked-challenges-card { grid-column: 1 / -1; min-height: 0; }
+.calendar-detail-row > .text-link:last-child { display: inline-flex; margin-top: 7px; }
+.project-item-target { outline: 2px solid #c58d9b; outline-offset: 3px; border-radius: 8px; }
 .challenge-status { background: #4b3743; color: #efcbd3; padding: 8px 12px; border-radius: 999px; white-space: nowrap; }
 .challenge-page .check-row { display: inline-flex; flex-direction: row; align-items: center; gap: 9px; margin: 6px 15px 6px 0; font-size: 12px; }
 .challenge-page .check-row input { width: 16px; height: 16px; accent-color: #c58d9b; }
