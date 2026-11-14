@@ -1,6 +1,6 @@
 // Navigation through the real E2E application and its disposable SQLite profile.
 import { $, $$, browser, expect } from '@wdio/globals';
-import { button, go, invoke, localDate, onboard, reloadView, restartApp, seedTask } from '../lib/app.mjs';
+import { button, go, invoke, localDate, onboard, reloadView, restartApp, seedTask, waitForPersisted } from '../lib/app.mjs';
 
 const projectId = 'navigation-project';
 const archivedId = 'navigation-archived';
@@ -48,8 +48,12 @@ describe('Calendar and engineering navigation (isolated native application)', ()
 
     await invoke('save_project', { project: project(projectId, projectTitle, 'Planning') });
     await invoke('save_project', { project: project(archivedId, 'Navigation archived project', 'Archived') });
-    await seedTask({ id: taskId, title: taskTitle, category: 'Engineering', projectId, dueDate: projectDay });
-    await seedTask({ id: archivedTaskId, title: archivedTaskTitle, category: 'Engineering', projectId: archivedId, dueDate: projectDay });
+    const savedTask = await seedTask({ id: taskId, title: taskTitle, category: 'Engineering', dueDate: projectDay });
+    await invoke('associate_task', { taskId: savedTask.id, projectId });
+    await waitForPersisted('load_workspace', data => data.tasks.find(t => t.id === savedTask.id)?.projectId === projectId, 'project task association');
+    const savedArchivedTask = await seedTask({ id: archivedTaskId, title: archivedTaskTitle, category: 'Engineering', dueDate: projectDay });
+    await invoke('associate_task', { taskId: savedArchivedTask.id, projectId: archivedId });
+    await waitForPersisted('load_workspace', data => data.tasks.find(t => t.id === savedArchivedTask.id)?.projectId === archivedId, 'archived project task association');
     await invoke('save_milestone', { milestone: {
       id: milestoneId, projectId, title: milestoneTitle, description: '', targetDate: projectDay,
       completedAtMs: null, createdAtMs: 1, updatedAtMs: 1,
@@ -63,22 +67,32 @@ describe('Calendar and engineering navigation (isolated native application)', ()
       challenges: await invoke('load_challenges', {}),
       workspace: await invoke('load_workspace', {}),
     };
+    expect(original.workspace.tasks.find(t => t.id === savedTask.id)).toMatchObject({ projectId, dueDate: projectDay, completedAtMs: null });
+    expect(original.workspace.tasks.find(t => t.id === savedArchivedTask.id)).toMatchObject({ projectId: archivedId, dueDate: projectDay, completedAtMs: null });
+    expect(original.projects.milestones.find(m => m.id === milestoneId)).toMatchObject({ projectId, targetDate: projectDay, completedAtMs: null });
+    expect(original.projects.projects.find(p => p.id === archivedId)?.status).toBe('Archived');
     await reloadView();
   });
 
   it('opens the exact project task and milestone, then restores Calendar focus', async () => {
     await go('Calendar');
+    await button('Week').click();
     await $(`#calendar-day-${projectDay}`).click();
     await button('Open project for ' + taskTitle).click();
     await expect($(`//h1[normalize-space(.)="${projectTitle}"]`)).toBeDisplayed();
     await expectFocus('project-tasks-' + taskId);
     await button('Back to Calendar').click();
     await expectFocus('calendar-project-task-' + taskId);
+    await expect(button('Week')).toHaveAttribute('aria-pressed', 'true');
+    expect(await $(`#calendar-day-${projectDay}`).getAttribute('class')).toContain('selected');
     await button('Open project for ' + milestoneTitle).click();
     await expect($(`//h1[normalize-space(.)="${projectTitle}"]`)).toBeDisplayed();
     await expectFocus('project-milestones-' + milestoneId);
     await button('Back to Calendar').click();
     await expectFocus('calendar-project-milestone-' + milestoneId);
+    await expect(button('Week')).toHaveAttribute('aria-pressed', 'true');
+    expect(await $(`#calendar-day-${projectDay}`).getAttribute('class')).toContain('selected');
+    await button('Month').click();
   });
 
   it('opens the exact dated challenge and returns to its challenge-only day', async () => {
@@ -99,12 +113,17 @@ describe('Calendar and engineering navigation (isolated native application)', ()
   });
 
   it('opens an archived project without changing its status', async () => {
+    if (!(await $(`#calendar-day-${projectDay}`).isExisting())) await button('Previous period').click();
     await $(`#calendar-day-${projectDay}`).click();
+    await button('Week').click();
     await button('Open project for ' + archivedTaskTitle).click();
     await expect($('//h1[normalize-space(.)="Navigation archived project"]')).toBeDisplayed();
     await expectFocus('project-tasks-' + archivedTaskId);
     await button('Back to Calendar').click();
     await expectFocus('calendar-project-task-' + archivedTaskId);
+    await expect(button('Week')).toHaveAttribute('aria-pressed', 'true');
+    expect(await $(`#calendar-day-${projectDay}`).getAttribute('class')).toContain('selected');
+    await button('Month').click();
   });
 
   it('keeps the linked challenge and case study workspace reachable by exact relationship', async () => {
@@ -131,7 +150,12 @@ describe('Calendar and engineering navigation (isolated native application)', ()
     expect(current.challenges.projects).toEqual(original.challenges.projects);
     expect(current.workspace.tasks).toEqual(original.workspace.tasks);
     expect(current.workspace.events).toEqual(original.workspace.events);
+    expect(current.workspace.tasks.find(t => t.id === taskId)?.projectId).toBe(projectId);
+    expect(current.workspace.tasks.find(t => t.id === archivedTaskId)?.projectId).toBe(archivedId);
+    expect(current.projects.milestones.find(m => m.id === milestoneId)?.projectId).toBe(projectId);
+    expect(current.projects.projects.find(p => p.id === archivedId)?.status).toBe('Archived');
     expect(current.projects.projects.filter(p => p.id === projectId)).toHaveLength(1);
+    expect(current.workspace.tasks.filter(t => t.id === taskId || t.id === archivedTaskId)).toHaveLength(2);
     expect(current.challenges.progress.filter(p => p.challengeId === challengeId)).toHaveLength(1);
     await go('Calendar');
     await $(`#calendar-day-${challengeDay}`).click();
