@@ -1,0 +1,44 @@
+name: Disposable protected installation rehearsal
+on:
+  push:
+    branches:
+      - verification/scope-a-installation-rehearsal
+permissions:
+  contents: read
+concurrency:
+  group: protected-installation-rehearsal
+  cancel-in-progress: false
+jobs:
+  rehearsal:
+    if: github.repository == 'webswe/CivilDesk' && github.ref == 'refs/heads/verification/scope-a-installation-rehearsal'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      CI: 'true'
+      CARGO_TARGET_DIR: ${{ github.workspace }}\src-tauri\target\rehearsal
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target/rehearsal
+      - run: npm ci
+      - run: npm run check:protected-install
+      - run: node scripts/check-protected-ci.mjs
+      - run: node scripts/rehearsal/check-workflow.mjs
+      - shell: pwsh
+        run: ./scripts/test-protected-installer-metadata.ps1
+      - name: Build exact protected NSIS installer in this job
+        run: npm run tauri build -- --bundles nsis --config src-tauri/tauri.protected.conf.json
+      - name: Rehearse installation on disposable runner
+        shell: pwsh
+        run: ./scripts/rehearsal/run.ps1 -SourceSha $env:GITHUB_SHA -TargetDirectory $env:CARGO_TARGET_DIR
