@@ -76,10 +76,33 @@ describe('calendar project navigation',()=>{
     const day=screen.getByRole('button',{name:/Mon Nov 16 2026/});
     expect(within(day).getByText('Challenge - '+c.title)).toBeInTheDocument();
     expect(day).toHaveAccessibleName(/1 challenge deadline/);
+    const detail=document.querySelector('.calendar-detail');
+    expect(detail).not.toBeNull();
+    expect(within(detail as HTMLElement).getByRole('button',{name:'Open challenge '+c.title})).toBeInTheDocument();
+    expect(within(detail as HTMLElement).queryByText('Nothing scheduled for this day.')).toBeNull();
+    expect(document.querySelectorAll('.calendar-detail-row')).toHaveLength(1);
     fireEvent.click(screen.getByRole('button',{name:'Open challenge '+c.title}));
     expect(openChallenge).toHaveBeenCalledExactlyOnceWith(c.id);
     expect(data.events).toHaveLength(0);
     expect({challenges,data}).toEqual(before);
+  });
+  it.each(['Month','Week','Day'])('shows the empty state for a genuinely empty %s day',view=>{
+    mount(workspace([]),{projects:[],milestones:[],files:[],journal:[]});
+    if(view!=='Month')fireEvent.click(screen.getByRole('button',{name:view}));
+    const detail=document.querySelector('.calendar-detail') as HTMLElement;
+    expect(within(detail).getByText('Nothing scheduled for this day.')).toBeInTheDocument();
+    expect(within(detail).queryByRole('button',{name:/Open (challenge|project)/})).toBeNull();
+  });
+  it('keeps a challenge and project milestone in one selected-day detail without duplicate records',()=>{
+    const challenges=challengeData(), projects={projects:[project('p1')],milestones:[milestone('m1','p1')],files:[],journal:[]};
+    const data=workspace([]), before=structuredClone({challenges,projects,data});
+    mount(data,projects,{challenges,openChallenge:vi.fn()});
+    const detail=document.querySelector('.calendar-detail') as HTMLElement;
+    expect(within(detail).getByRole('button',{name:'Open challenge '+challenges.challenges[0]!.title})).toBeInTheDocument();
+    expect(within(detail).getByRole('button',{name:'Open project for Milestone m1'})).toBeInTheDocument();
+    expect(within(detail).queryByText('Nothing scheduled for this day.')).toBeNull();
+    expect(document.querySelectorAll('.calendar-detail-row')).toHaveLength(2);
+    expect({challenges,projects,data}).toEqual(before);
   });
   it('hides completed and skipped commitments without erasing their saved dates',()=>{
     for(const status of ['Completed','Skipped'] as const){
@@ -87,12 +110,25 @@ describe('calendar project navigation',()=>{
       const view=mount(workspace([]),{projects:[],milestones:[],files:[],journal:[]},{challenges:value,openChallenge:vi.fn()});
       expect(screen.queryByRole('button',{name:/Open challenge/})).toBeNull();
       expect(screen.queryByText(/Challenge -/)).toBeNull();
+      expect(screen.getByText('Nothing scheduled for this day.')).toBeInTheDocument();
       expect(value).toEqual(before);
       view.unmount();
     }
   });
   it('shows a missing challenge as unavailable without an unsafe action',()=>{
     const value=challengeData('In Progress','removed-id');
+    mount(workspace([]),{projects:[],milestones:[],files:[],journal:[]},{challenges:value,openChallenge:vi.fn()});
+    expect(screen.getByText('Challenge unavailable')).toBeInTheDocument();
+    expect(screen.queryByRole('button',{name:/Open challenge/})).toBeNull();
+  });
+  it('uses the saved challenge version and fails closed when that version is unavailable',()=>{
+    const value=challengeData(), original=value.versions[0]!;
+    value.challenges[0]={...original,title:'Newer unsaved title',version:original.version+1};
+    const first=mount(workspace([]),{projects:[],milestones:[],files:[],journal:[]},{challenges:value,openChallenge:vi.fn()});
+    expect(screen.getByRole('button',{name:'Open challenge '+original.title})).toBeInTheDocument();
+    expect(screen.queryByText('Newer unsaved title')).toBeNull();
+    first.unmount();
+    value.versions=[];
     mount(workspace([]),{projects:[],milestones:[],files:[],journal:[]},{challenges:value,openChallenge:vi.fn()});
     expect(screen.getByText('Challenge unavailable')).toBeInTheDocument();
     expect(screen.queryByRole('button',{name:/Open challenge/})).toBeNull();
@@ -105,6 +141,8 @@ describe('calendar project navigation',()=>{
     const day=screen.getByRole('button',{name:/Mon Nov 16 2026/});
     expect(within(day).getByText(/Challenge - .* \+1/)).toBeInTheDocument();
     expect(day).toHaveAccessibleName(/2 challenge deadlines/);
+    expect(document.querySelectorAll('.calendar-detail .calendar-detail-row')).toHaveLength(2);
+    expect(screen.queryByText('Nothing scheduled for this day.')).toBeNull();
     fireEvent.click(screen.getByRole('button',{name:'Open challenge '+second.title}));
     expect(openChallenge).toHaveBeenCalledExactlyOnceWith(second.id);
     expect(data.events).toHaveLength(0);
