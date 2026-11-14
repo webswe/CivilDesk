@@ -508,6 +508,134 @@ mod tests {
             std::process::id()
         ))
     }
+
+    // v9 and v10 only add tables. Removing those tables from a fresh schema gives
+    // a synthetic v8 file without reading or copying a user's database.
+    fn synthetic_v8(path: &Path) {
+        let connection = Connection::open(path).unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        migrate(&connection).unwrap();
+        connection.execute_batch("DROP TABLE notion_sources;
+            DROP TABLE notion_connection;
+            DROP TABLE portfolio_gallery;
+            DROP TABLE portfolio_milestones;
+            DROP TABLE portfolio_tools;
+            DROP TABLE portfolio_case_studies;
+            PRAGMA user_version = 8;
+            INSERT INTO engineering_projects(id,title,description,discipline,category,project_type,status,created_at_ms,updated_at_ms)
+              VALUES('project','Bridge study','','Civil','Structural','Concept','Planning',1,1);
+            INSERT INTO tasks(id,title,created_at_ms,updated_at_ms,project_id)
+              VALUES('task','Review drawings',1,1,'project');
+            INSERT INTO semesters(id,name,start_date,end_date,created_at_ms,updated_at_ms)
+              VALUES('term','Fall','2026-08-01','2026-12-31',1,1);
+            INSERT INTO courses(id,semester_id,code,name,created_at_ms,updated_at_ms)
+              VALUES('course','term','CIV101','Civil Engineering',1,1);
+            INSERT INTO task_academic(task_id,course_id,work_type,created_at_ms)
+              VALUES('task','course','assignment',1);
+            INSERT INTO goals(id,title,kind,start_date,created_at_ms,updated_at_ms)
+              VALUES('goal','Finish portfolio','binary','2026-01-01',1,1);
+            INSERT INTO calendar_events(id,title,description,start_date,end_date,all_day,time_zone,created_at_ms,updated_at_ms)
+              VALUES('event','Exam','','2026-11-01','2026-11-01',1,'America/New_York',1,1);
+            INSERT INTO app_state(key,value) VALUES('marker','preserve-v8');").unwrap();
+    }
+
+    #[test]
+    fn synthetic_v8_to_v10_preserves_user_records_and_database_health() {
+        let path = unique_test_path();
+        synthetic_v8(&path);
+        {
+            let db = Database::open(&path).unwrap();
+            let conn = db.0.lock().unwrap();
+            let version: u32 = conn
+                .pragma_query_value(None, "user_version", |r| r.get(0))
+                .unwrap();
+            assert_eq!(version, 10);
+            let integrity: String = conn
+                .query_row("PRAGMA quick_check", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(integrity, "ok");
+            let foreign_key_violations: i64 = conn
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
+                    r.get(0)
+                })
+                .unwrap();
+            assert_eq!(foreign_key_violations, 0);
+            for (table, key) in [
+                ("engineering_projects", "project"),
+                ("tasks", "task"),
+                ("courses", "course"),
+                ("goals", "goal"),
+                ("calendar_events", "event"),
+            ] {
+                let query = format!("SELECT COUNT(*) FROM {table} WHERE id=?1");
+                let count: i64 = conn.query_row(&query, [key], |r| r.get(0)).unwrap();
+                assert_eq!(count, 1, "{table} was lost");
+            }
+            let marker: String = conn
+                .query_row("SELECT value FROM app_state WHERE key='marker'", [], |r| {
+                    r.get(0)
+                })
+                .unwrap();
+            assert_eq!(marker, "preserve-v8");
+            let notion_count: i64 = conn
+                .query_row("SELECT COUNT(*) FROM notion_connection", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(notion_count, 0);
+            conn.execute_batch(
+                "INSERT INTO notion_connection
+                (id,identifier,status,connected_at_ms)
+                VALUES('default','com.webswe.civildesk','connected',1);",
+            )
+            .unwrap();
+        }
+        let reopened = Connection::open(&path).unwrap();
+        let notion_identity: String = reopened
+            .query_row(
+                "SELECT identifier FROM notion_connection WHERE id='default'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(notion_identity, "com.webswe.civildesk");
+        drop(reopened);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn failed_synthetic_v8_migration_preserves_original_rows() {
+        let path = unique_test_path();
+        synthetic_v8(&path);
+        {
+            let connection = Connection::open(&path).unwrap();
+            connection
+                .execute_batch("CREATE TABLE portfolio_case_studies(conflict TEXT);")
+                .unwrap();
+        }
+        assert!(Database::open(&path).is_err());
+        let connection = Connection::open(&path).unwrap();
+        let version: u32 = connection
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 8);
+        let marker: String = connection
+            .query_row("SELECT value FROM app_state WHERE key='marker'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(marker, "preserve-v8");
+        let integrity: String = connection
+            .query_row("PRAGMA quick_check", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(integrity, "ok");
+        let partial_table: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='portfolio_gallery'",
+            [], |r| r.get(0)).unwrap();
+        assert_eq!(partial_table, 0);
+        drop(connection);
+        std::fs::remove_file(path).unwrap();
+    }
     #[test]
     fn migration_and_round_trip() {
         let db = Database(Mutex::new(Connection::open_in_memory().unwrap()));
