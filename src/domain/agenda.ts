@@ -2,6 +2,7 @@ import { localDate } from './scheduling';
 import type { CalendarEvent } from '../services/calendar';
 import type { Task, WorkspaceData } from '../services/workspace';
 import type { ChallengeData } from '../services/challenges';
+import { activeChallengeDeadlines } from '../services/challenges';
 import type { ProjectsData } from '../services/projects';
 
 export function addDays(date: Date, n: number): Date { const next = new Date(date.getFullYear(), date.getMonth(), date.getDate()); next.setDate(next.getDate() + n); return next; }
@@ -42,7 +43,7 @@ export function buildAgenda(data: WorkspaceData, projects: ProjectsData, challen
   for (const t of open) if (t.dueDate && t.dueDate > today && t.dueDate <= limit) upcoming.push({ key: 't' + t.id, kind: 'task', title: t.title, date: t.dueDate, time: t.dueTime, note: t.dueTime ? 'Due ' + t.dueTime : 'Due', taskId: t.id });
   for (const e of data.events) { const r = localRange(e); if (r.startDate > today && r.startDate <= limit) upcoming.push({ key: 'e' + e.id, kind: 'event', title: e.title, date: r.startDate, time: e.allDay ? null : r.startTime, note: e.allDay ? 'All day' : r.startTime || '' }); }
   // Engineering commitments appear only when the user set a date for them.
-  for (const p of challenges.progress) if (p.deadlineDate && p.status !== 'Completed' && p.status !== 'Skipped' && p.deadlineDate >= today && p.deadlineDate <= limit) upcoming.push({ key: 'c' + p.challengeId, kind: 'challenge', title: challenges.challenges.find(c => c.id === p.challengeId)?.title || p.challengeId, date: p.deadlineDate, time: null, note: 'Challenge deadline' });
+  for (const {progress,challenge} of activeChallengeDeadlines(challenges)) if (progress.deadlineDate && progress.deadlineDate >= today && progress.deadlineDate <= limit) upcoming.push({ key: 'c' + progress.challengeId, kind: 'challenge', title: challenge?.title || progress.challengeId, date: progress.deadlineDate, time: null, note: 'Challenge deadline' });
   for (const m of projects.milestones) if (!m.completedAtMs && m.targetDate > today && m.targetDate <= limit) upcoming.push({ key: 'm' + m.id, kind: 'milestone', title: m.title, date: m.targetDate, time: null, note: 'Project milestone' });
   upcoming.sort((a, b) => a.date.localeCompare(b.date) || (a.time ?? '').localeCompare(b.time ?? ''));
   const next = [...overdue, ...todayTasks].sort((a, b) => rank[a.priority] - rank[b.priority] || byDue(a, b))[0] ?? open.filter(t => t.dueDate).sort(byDue)[0] ?? open[0] ?? null;
