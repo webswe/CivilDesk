@@ -29,63 +29,59 @@ def health(conn, version):
 
 def run(repo, temp_root):
     sql = migrations(repo)
-    temp_root.mkdir(parents=True, exist_ok=True)
+    if temp_root.exists():
+        raise FileExistsError('Synthetic migration fixture directory already exists')
+    temp_root.mkdir(parents=True)
     prefix = 'civildesk-synthetic-' + uuid.uuid4().hex
     old, backup = temp_root / (prefix + '-v8.sqlite3'), temp_root / (prefix + '-backup.sqlite3')
     failed = temp_root / (prefix + '-failed.sqlite3')
-    try:
-        with sqlite3.connect(old) as db:
-            db.execute('PRAGMA foreign_keys=ON')
-            for block in sql[:8]:
-                db.executescript(block)
-            db.execute("INSERT INTO app_state(key,value) VALUES('rehearsal-marker','synthetic-only')")
-            db.execute("INSERT INTO engineering_projects(id,title,description,discipline,category,project_type,status,created_at_ms,updated_at_ms) VALUES('synthetic-project','Test','','Civil','Structural','Concept','Planning',1,1)")
-            db.commit()
-            health(db, 8)
-            with sqlite3.connect(backup) as target:
-                db.backup(target)
-        before = digest(backup)
-        with sqlite3.connect(backup) as db:
-            health(db, 8)
-            assert db.execute("SELECT value FROM app_state WHERE key='rehearsal-marker'").fetchone()[0] == 'synthetic-only'
-        with sqlite3.connect(old) as db:
-            db.execute('PRAGMA foreign_keys=ON')
-            for block in sql[8:10]:
-                db.executescript(block)
-            health(db, 10)
-            assert db.execute("SELECT value FROM app_state WHERE key='rehearsal-marker'").fetchone()[0] == 'synthetic-only'
-            assert db.execute("SELECT title FROM engineering_projects WHERE id='synthetic-project'").fetchone()[0] == 'Test'
-        assert digest(backup) == before
-        shutil.copy2(backup, failed)
-        with sqlite3.connect(failed) as db:
-            db.execute('CREATE TABLE portfolio_case_studies(conflict TEXT)')
-            db.commit()
-            try:
-                db.executescript(sql[8])
-            except sqlite3.DatabaseError:
-                pass
-            else:
-                raise AssertionError('Expected conflicting migration to fail')
-            health(db, 8)
-            assert db.execute("SELECT value FROM app_state WHERE key='rehearsal-marker'").fetchone()[0] == 'synthetic-only'
-            assert db.execute("SELECT COUNT(*) FROM sqlite_master WHERE name='portfolio_gallery'").fetchone()[0] == 0
-        # An old binary cannot safely open v10. Rollback restores a matched v8 file.
-        with sqlite3.connect(old) as db:
-            assert db.execute('PRAGMA user_version').fetchone()[0] == 10
-        shutil.copy2(backup, old)
-        assert digest(old) == before
-        with sqlite3.connect(old) as db:
-            health(db, 8)
-        return {'status': 'PASS', 'source': 'shipped persistence.rs SQL',
-                'v8_to_v10': True, 'backup_sha256': before,
-                'failed_migration_rollback': True, 'matched_v8_rollback': True,
-                'uninstall_preservation': 'NOT VERIFIED'}
-    finally:
-        for path in (old, backup, failed):
-            try:
-                path.unlink(missing_ok=True)
-            except PermissionError:
-                pass  # Windows scanners may briefly retain a handle in disposable temp.
+    with sqlite3.connect(old) as db:
+        db.execute('PRAGMA foreign_keys=ON')
+        for block in sql[:8]:
+            db.executescript(block)
+        db.execute("INSERT INTO app_state(key,value) VALUES('rehearsal-marker','synthetic-only')")
+        db.execute("INSERT INTO engineering_projects(id,title,description,discipline,category,project_type,status,created_at_ms,updated_at_ms) VALUES('synthetic-project','Test','','Civil','Structural','Concept','Planning',1,1)")
+        db.commit()
+        health(db, 8)
+        with sqlite3.connect(backup) as target:
+            db.backup(target)
+    before = digest(backup)
+    with sqlite3.connect(backup) as db:
+        health(db, 8)
+        assert db.execute("SELECT value FROM app_state WHERE key='rehearsal-marker'").fetchone()[0] == 'synthetic-only'
+    with sqlite3.connect(old) as db:
+        db.execute('PRAGMA foreign_keys=ON')
+        for block in sql[8:10]:
+            db.executescript(block)
+        health(db, 10)
+        assert db.execute("SELECT value FROM app_state WHERE key='rehearsal-marker'").fetchone()[0] == 'synthetic-only'
+        assert db.execute("SELECT title FROM engineering_projects WHERE id='synthetic-project'").fetchone()[0] == 'Test'
+    assert digest(backup) == before
+    shutil.copy2(backup, failed)
+    with sqlite3.connect(failed) as db:
+        db.execute('CREATE TABLE portfolio_case_studies(conflict TEXT)')
+        db.commit()
+        try:
+            db.executescript(sql[8])
+        except sqlite3.DatabaseError:
+            pass
+        else:
+            raise AssertionError('Expected conflicting migration to fail')
+        health(db, 8)
+        assert db.execute("SELECT value FROM app_state WHERE key='rehearsal-marker'").fetchone()[0] == 'synthetic-only'
+        assert db.execute("SELECT COUNT(*) FROM sqlite_master WHERE name='portfolio_gallery'").fetchone()[0] == 0
+    # An old binary cannot safely open v10. Rollback restores a matched v8 file.
+    with sqlite3.connect(old) as db:
+        assert db.execute('PRAGMA user_version').fetchone()[0] == 10
+    shutil.copy2(backup, old)
+    assert digest(old) == before
+    with sqlite3.connect(old) as db:
+        health(db, 8)
+    return {'status': 'PASS', 'source': 'shipped persistence.rs SQL',
+            'v8_to_v10': True, 'backup_sha256': before,
+            'failed_migration_rollback': True, 'matched_v8_rollback': True,
+            'uninstall_preservation': 'NOT VERIFIED',
+            'fixture_cleanup': 'PENDING_RUNNER_GATE'}
 
 
 if __name__ == '__main__':

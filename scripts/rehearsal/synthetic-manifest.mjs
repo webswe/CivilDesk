@@ -6,7 +6,7 @@ import { verifyFrozenPackage } from '../lib/frozen-package-verifier.mjs';
 
 const [root, runnerTemp] = process.argv.slice(2);
 if (process.env.GITHUB_ACTIONS !== 'true' || process.env.RUNNER_ENVIRONMENT !== 'github-hosted'
-  || process.env.GITHUB_REF !== 'refs/heads/verification/scope-a-installation-rehearsal'
+  || process.env.GITHUB_EVENT_NAME !== 'workflow_dispatch' || process.env.GITHUB_REF !== 'refs/heads/main'
   || !root || !runnerTemp || !path.resolve(root).toLowerCase().startsWith(path.join(process.env.ProgramFiles, 'CivilDesk D2L-CLI Rehearsal').toLowerCase() + path.sep)
   || !path.resolve(runnerTemp).toLowerCase().startsWith(path.resolve(process.env.RUNNER_TEMP).toLowerCase())) {
   throw new Error('Synthetic manifest runner guard failed.');
