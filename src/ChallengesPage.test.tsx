@@ -58,4 +58,31 @@ describe('weekly challenge board', () => {
     expect(openProject).toHaveBeenNthCalledWith(1, 'project-1');
     expect(openProject).toHaveBeenNthCalledWith(2, 'project-1', 'Portfolio');
   });
+  it('focuses an exact scheduled challenge and offers Calendar return and date navigation',()=>{
+    const value=data(false), c=value.challenges[0]!, backToCalendar=vi.fn(), openCalendar=vi.fn();
+    value.progress=[{challengeId:c.id,contentVersion:c.version,mode:'guided',status:'In Progress',notes:'',deadlineDate:'2026-11-18',startedAtMs:1,completedAtMs:null,checks:[]}];
+    const before=structuredClone(value);
+    page(value,{initialChallengeId:c.id,backToCalendar,openCalendar});
+    expect(screen.getByRole('heading',{name:c.title})).toHaveFocus();
+    fireEvent.click(screen.getByRole('button',{name:'View on Calendar'}));
+    expect(openCalendar).toHaveBeenCalledWith(c.id,'2026-11-18');
+    fireEvent.click(screen.getByRole('button',{name:'Back to Calendar'}));
+    expect(backToCalendar).toHaveBeenCalledOnce();
+    expect(value).toEqual(before);
+  });
+  it('keeps a saved historical version available and handles a missing one safely',()=>{
+    const value=data(false), c=value.challenges[0]!;
+    value.progress=[{challengeId:c.id,contentVersion:c.version,mode:'guided',status:'In Progress',notes:'',deadlineDate:'2026-11-18',startedAtMs:1,completedAtMs:null,checks:[]}];
+    value.challenges=value.challenges.filter(x=>x.id!==c.id);
+    const old=page(value,{initialChallengeId:c.id,backToCalendar:vi.fn()});
+    expect(screen.getByRole('heading',{name:c.title})).toHaveFocus();
+    old.unmount();
+    value.versions=value.versions.filter(x=>x.id!==c.id);
+    value.challenges=[c,...value.challenges];
+    const backToCalendar=vi.fn();
+    page(value,{initialChallengeId:c.id,backToCalendar});
+    expect(screen.getByRole('heading',{name:'Challenge unavailable'})).toHaveFocus();
+    fireEvent.click(screen.getByRole('button',{name:'Back to Calendar'}));
+    expect(backToCalendar).toHaveBeenCalledOnce();
+  });
 });

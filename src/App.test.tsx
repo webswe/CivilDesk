@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import App from './App';
+import library from '../src-tauri/src/challenge_library.json';
 import { localDate } from './domain/scheduling';
 import { associateTask, loadProjects, saveMilestone, saveProject } from './services/projects';
-import { saveTask } from './services/workspace';
+import { loadWorkspace, saveTask } from './services/workspace';
+import { challengeAction, loadChallenges } from './services/challenges';
 
 describe('first-run workspace', () => {
   beforeEach(() => localStorage.clear());
@@ -179,5 +181,27 @@ describe('first-run workspace', () => {
     expect(await screen.findByRole('tab',{name:'Milestones'})).toHaveAttribute('aria-selected','true');
     expect(document.activeElement?.id).toBe('project-milestones-'+milestoneId);
     expect(await loadProjects()).toEqual(before);
+  });
+
+  it('opens a user-dated challenge from Calendar and returns without changing records',async()=>{
+    const c=library[3]!, today=localDate();
+    await challengeAction(c.id,'start',{mode:'guided'});
+    await challengeAction(c.id,'deadline',{deadline:today});
+    const beforeChallenges=await loadChallenges(), beforeWorkspace=await loadWorkspace();
+    await enter('Avery');
+    fireEvent.click(screen.getByRole('button',{name:'Calendar'}));
+    fireEvent.click(screen.getByRole('button',{name:'Week'}));
+    const open=await screen.findByRole('button',{name:'Open challenge '+c.title});
+    expect(screen.getAllByRole('button',{name:'Open challenge '+c.title})).toHaveLength(1);
+    fireEvent.click(open);
+    expect(await screen.findByRole('heading',{name:c.title})).toHaveFocus();
+    fireEvent.click(screen.getByRole('button',{name:'Back to Calendar'}));
+    expect(screen.getByRole('button',{name:'Week'})).toHaveAttribute('aria-pressed','true');
+    expect(screen.getByRole('button',{name:'Open challenge '+c.title})).toHaveFocus();
+    fireEvent.click(screen.getByRole('button',{name:'Open challenge '+c.title}));
+    fireEvent.click(screen.getByRole('button',{name:'View on Calendar'}));
+    expect(screen.getByRole('button',{name:'Open challenge '+c.title})).toHaveFocus();
+    expect(await loadChallenges()).toEqual(beforeChallenges);
+    expect(await loadWorkspace()).toEqual(beforeWorkspace);
   });
 });

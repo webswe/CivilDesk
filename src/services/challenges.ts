@@ -11,6 +11,13 @@ export interface Evidence { id:string; challengeId:string; displayName:string; p
 export interface Pathway { id:string; title:string; description:string; track:string; challengeIds:string[] }
 export interface ChallengeProject { challengeId:string; projectId:string; createdFromChallenge:boolean }
 export interface ChallengeData { challenges:Challenge[]; versions:Challenge[]; settings:ChallengeSettings; assignments:Assignment[]; progress:Progress[]; evidence:Evidence[]; pathways:Pathway[]; projects:ChallengeProject[] }
+/** Projects only explicit, active deadlines; a weekly assignment is never a due date. */
+export function activeChallengeDeadlines(data:ChallengeData,date?:string):{progress:Progress;challenge:Challenge|null}[]{
+  return data.progress.filter(p=>p.status==='In Progress'&&Boolean(p.deadlineDate)&&(!date||p.deadlineDate===date)).map(progress=>({
+    progress,
+    challenge:(data.versions?data.versions.find(c=>c.id===progress.challengeId&&c.version===progress.contentVersion):data.challenges.find(c=>c.id===progress.challengeId))??null,
+  }));
+}
 const native=()=> '__TAURI_INTERNALS__' in window;
 const preview:ChallengeData={challenges:structuredClone(library),versions:structuredClone(library),settings:{automatic:false,tracks:['AutoCAD','Civil 3D','Revit'],difficulties:['Beginner','Intermediate','Advanced'],weeklyCount:2},assignments:[],progress:[],evidence:[],pathways:[{id:'cad-foundations',title:'AutoCAD drawing practice',description:'Optional sequence',track:'AutoCAD',challengeIds:['acad-drafting','acad-site-plan','acad-layout']},{id:'roadway-concepts',title:'Civil 3D roadway concepts',description:'Optional sequence',track:'Civil 3D',challengeIds:['c3d-survey','c3d-alignment','c3d-roadway']},{id:'bim-documentation',title:'Revit model to documents',description:'Optional sequence',track:'Revit',challengeIds:['revit-bim','revit-foundation','revit-docs']}],projects:[]};
 export const loadChallenges=async():Promise<ChallengeData>=>native()?invoke('load_challenges'):structuredClone(preview);

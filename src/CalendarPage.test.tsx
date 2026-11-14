@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import library from '../src-tauri/src/challenge_library.json';
 import { CalendarPage, type CalendarPosition } from './CalendarPage';
 import type { Project, ProjectsData } from './services/projects';
 import type { Task, WorkspaceData } from './services/workspace';
@@ -15,6 +16,7 @@ const task=(id:string,projectId:string|null):Task=>({id,title:'Task '+id,descrip
 const workspace=(tasks:Task[],events:WorkspaceData['events']=[]):WorkspaceData=>({tasks,events,sessions:[],reminderPreferences:{enabled:false,quietStart:'22:00',quietEnd:'08:00'},focusDurationMinutes:25,breakDurationMinutes:5,progression:{xp:0,level:1,earned:[],unlocked:[],styleId:'classic',scarf:false,headphones:false,history:[]}});
 const milestone=(id:string,projectId:string)=>({id,projectId,title:'Milestone '+id,description:'',targetDate:date,completedAtMs:null,createdAtMs:1,updatedAtMs:1});
 const empty={challenges:{progress:[]} as unknown as ChallengeData,academic:{courses:[],work:[]} as unknown as AcademicData,study:{blocks:[],sessions:[]} as unknown as StudyData,personal:{routines:[]} as unknown as PersonalData};
+const challengeData=(status:'In Progress'|'Completed'|'Skipped'='In Progress',id=library[0]!.id):ChallengeData=>({challenges:structuredClone(library),versions:structuredClone(library),settings:{automatic:false,tracks:[],difficulties:[],weeklyCount:1},assignments:[],progress:[{challengeId:id,contentVersion:1,mode:'guided',status,notes:'',deadlineDate:date,startedAtMs:1,completedAtMs:status==='Completed'?2:null,checks:[]}],evidence:[],pathways:[],projects:[]});
 const noop=async()=>true;
 function mount(data:WorkspaceData,projects:ProjectsData,options:Partial<Parameters<typeof CalendarPage>[0]>={}){
   const openProject=vi.fn();
@@ -64,5 +66,53 @@ describe('calendar project navigation',()=>{
     expect(screen.getByRole('button',{name:'Week'})).toHaveAttribute('aria-pressed','true');
     expect(screen.getByRole('heading',{name:/Tuesday, November 17/})).toBeInTheDocument();
     expect(screen.getByRole('button',{name:/Tue Nov 17 2026/})).toHaveFocus();
+  });
+  it.each(['Month','Week','Day'])('opens a saved challenge deadline by ID from %s view',view=>{
+    const challenges=challengeData(), c=challenges.challenges[0]!, openChallenge=vi.fn();
+    challenges.assignments=[{id:'weekly',weekStart:date,challengeId:c.id,contentVersion:1,source:'manual',status:'In Progress'}];
+    const data=workspace([]), before=structuredClone({challenges,data});
+    mount(data,{projects:[],milestones:[],files:[],journal:[]},{challenges,openChallenge});
+    if(view!=='Month')fireEvent.click(screen.getByRole('button',{name:view}));
+    const day=screen.getByRole('button',{name:/Mon Nov 16 2026/});
+    expect(within(day).getByText('Challenge - '+c.title)).toBeInTheDocument();
+    expect(day).toHaveAccessibleName(/1 challenge deadline/);
+    fireEvent.click(screen.getByRole('button',{name:'Open challenge '+c.title}));
+    expect(openChallenge).toHaveBeenCalledExactlyOnceWith(c.id);
+    expect(data.events).toHaveLength(0);
+    expect({challenges,data}).toEqual(before);
+  });
+  it('hides completed and skipped commitments without erasing their saved dates',()=>{
+    for(const status of ['Completed','Skipped'] as const){
+      const value=challengeData(status), before=structuredClone(value);
+      const view=mount(workspace([]),{projects:[],milestones:[],files:[],journal:[]},{challenges:value,openChallenge:vi.fn()});
+      expect(screen.queryByRole('button',{name:/Open challenge/})).toBeNull();
+      expect(screen.queryByText(/Challenge -/)).toBeNull();
+      expect(value).toEqual(before);
+      view.unmount();
+    }
+  });
+  it('shows a missing challenge as unavailable without an unsafe action',()=>{
+    const value=challengeData('In Progress','removed-id');
+    mount(workspace([]),{projects:[],milestones:[],files:[],journal:[]},{challenges:value,openChallenge:vi.fn()});
+    expect(screen.getByText('Challenge unavailable')).toBeInTheDocument();
+    expect(screen.queryByRole('button',{name:/Open challenge/})).toBeNull();
+  });
+  it('keeps multiple saved deadlines in one day marker and separate exact-ID actions',()=>{
+    const value=challengeData(), second=library[1]!;
+    value.progress.push({...value.progress[0]!,challengeId:second.id});
+    const openChallenge=vi.fn(), data=workspace([]);
+    mount(data,{projects:[],milestones:[],files:[],journal:[]},{challenges:value,openChallenge});
+    const day=screen.getByRole('button',{name:/Mon Nov 16 2026/});
+    expect(within(day).getByText(/Challenge - .* \+1/)).toBeInTheDocument();
+    expect(day).toHaveAccessibleName(/2 challenge deadlines/);
+    fireEvent.click(screen.getByRole('button',{name:'Open challenge '+second.title}));
+    expect(openChallenge).toHaveBeenCalledExactlyOnceWith(second.id);
+    expect(data.events).toHaveLength(0);
+  });
+  it('restores focus to the exact deadline action on return',()=>{
+    const value=challengeData(), c=value.challenges[0]!, onReturnFocused=vi.fn();
+    mount(workspace([]),{projects:[],milestones:[],files:[],journal:[]},{challenges:value,openChallenge:vi.fn(),returnFocus:{kind:'challenge',itemId:c.id},onReturnFocused});
+    expect(screen.getByRole('button',{name:'Open challenge '+c.title})).toHaveFocus();
+    expect(onReturnFocused).toHaveBeenCalledOnce();
   });
 });

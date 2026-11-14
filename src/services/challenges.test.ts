@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addChallengeEvidence, available, createChallengeProject, loadChallenges, skillProgress, weekStart, weeklyPreview, type ChallengeData } from './challenges';
+import { activeChallengeDeadlines, addChallengeEvidence, available, createChallengeProject, loadChallenges, skillProgress, weekStart, weeklyPreview, type ChallengeData } from './challenges';
 import { loadProjects } from './projects';
 import library from '../../src-tauri/src/challenge_library.json';
 
@@ -56,5 +56,19 @@ describe('engineering challenges',()=>{
     expect(value).toMatchObject({title:challenge.title,discipline:challenge.discipline,portfolioCandidate:false});
     expect(projects.files.filter(f=>f.projectId===id)).toEqual([expect.objectContaining({displayName:'drawing.dwg',path:'C:\\Synthetic\\drawing.dwg'})]);
     expect((await loadChallenges()).projects.filter(link=>link.challengeId===challenge.id)).toHaveLength(1);
+  });
+  it('projects only user-dated active progress and resolves its saved content version',()=>{
+    const d=data(), c=d.challenges[0]!;
+    d.assignments=[{id:'week',weekStart:'2026-11-16',challengeId:c.id,contentVersion:c.version,source:'manual',status:'Not Started'}];
+    expect(activeChallengeDeadlines(d)).toEqual([]);
+    d.challenges[0]={...c,title:'Newer title',version:c.version+1};
+    const progress=(id:string,status:'In Progress'|'Completed'|'Skipped',deadlineDate:string|null)=>({challengeId:id,contentVersion:c.version,mode:'guided' as const,status,notes:'',deadlineDate,startedAtMs:1,completedAtMs:status==='Completed'?2:null,checks:[]});
+    d.progress=[progress(c.id,'In Progress','2026-11-18'),progress('missing','In Progress','2026-11-18'),progress('done','Completed','2026-11-18'),progress('skipped','Skipped','2026-11-18'),progress('undated','In Progress',null)];
+    const before=structuredClone(d);
+    expect(activeChallengeDeadlines(d,'2026-11-17')).toEqual([]);
+    expect(activeChallengeDeadlines(d,'2026-11-18').map(x=>[x.progress.challengeId,x.challenge?.title??null])).toEqual([[c.id,c.title],['missing',null]]);
+    expect(d).toEqual(before);
+    d.versions=d.versions.filter(x=>x.id!==c.id);
+    expect(activeChallengeDeadlines(d,'2026-11-18')[0]?.challenge).toBeNull();
   });
 });

@@ -39,6 +39,7 @@ describe('My Day agenda', () => {
       { challengeId: 'c1', status: 'In Progress', deadlineDate: '2026-11-02', checks: [0] },
       { challengeId: 'c2', status: 'Completed', deadlineDate: '2026-11-02', checks: [] },
       { challengeId: 'c3', status: 'In Progress', deadlineDate: null, checks: [] },
+      { challengeId: 'c4', status: 'Skipped', deadlineDate: '2026-11-02', checks: [] },
     ] } as unknown as ChallengeData;
     const projects = { milestones: [{ id: 'm1', title: 'Draft review', targetDate: '2026-11-04', completedAtMs: null }, { id: 'm2', title: 'Done one', targetDate: '2026-11-04', completedAtMs: 5 }] } as unknown as ProjectsData;
     const a = buildAgenda(workspace([]), projects, challenges, now);
