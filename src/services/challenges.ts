@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import library from '../../src-tauri/src/challenge_library.json';
+import { saveProject, saveProjectFile } from './projects';
 
 export type Challenge = typeof library[number];
 export type ChallengeStatus = 'Not Started'|'In Progress'|'Completed'|'Skipped';
@@ -40,4 +41,15 @@ export async function challengeAction(id:string,action:string,options:{mode?:str
 export async function addChallengeEvidence(challengeId:string,path:string){const id=crypto.randomUUID();if(native())return invoke<void>('add_challenge_evidence',{id,challengeId,path});preview.evidence.push({id,challengeId,path,displayName:path.split(/[\\/]/).pop()||path,category:path.split('.').pop()||'',addedAtMs:Date.now(),missing:false});}
 export async function removeChallengeEvidence(id:string){if(native())return invoke<void>('remove_challenge_evidence',{id});preview.evidence=preview.evidence.filter(x=>x.id!==id);}
 export async function linkChallengeProject(challengeId:string,projectId:string){if(native())return invoke<void>('link_challenge_project',{challengeId,projectId});if(!preview.projects.some(x=>x.challengeId===challengeId&&x.projectId===projectId))preview.projects.push({challengeId,projectId,createdFromChallenge:false});}
-export async function createChallengeProject(challengeId:string):Promise<string>{if(native())return invoke('create_challenge_project',{challengeId});const id='challenge-'+challengeId;if(!preview.projects.some(x=>x.challengeId===challengeId&&x.createdFromChallenge))preview.projects.push({challengeId,projectId:id,createdFromChallenge:true});return id;}
+export async function createChallengeProject(challengeId:string):Promise<string>{
+  if(native())return invoke('create_challenge_project',{challengeId});
+  const existing=preview.projects.find(x=>x.challengeId===challengeId&&x.createdFromChallenge);
+  if(existing)return existing.projectId;
+  const challenge=preview.challenges.find(c=>c.id===challengeId);
+  if(!challenge)throw new Error('Challenge not found');
+  const id='challenge-'+challengeId;
+  await saveProject({id,title:challenge.title,description:challenge.description,discipline:challenge.discipline,category:'Learning challenge',projectType:'Educational',software:[challenge.track],startDate:null,targetDate:null,status:'Planning',priority:'normal',createdAtMs:0,updatedAtMs:0,completedAtMs:null,portfolioCandidate:false,portfolioSummary:'',objectives:challenge.objectives.join('\n'),contributions:'',skills:challenge.skills.join(', '),decisions:'',lessons:''});
+  for(const file of preview.evidence.filter(e=>e.challengeId===challengeId))await saveProjectFile({id:id+':'+file.id,projectId:id,displayName:file.displayName,path:file.path,category:file.category,description:'Linked from learning challenge',addedAtMs:file.addedAtMs,missing:file.missing});
+  preview.projects.push({challengeId,projectId:id,createdFromChallenge:true});
+  return id;
+}

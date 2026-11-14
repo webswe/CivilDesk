@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { available, skillProgress, weekStart, weeklyPreview, type ChallengeData } from './challenges';
+import { addChallengeEvidence, available, createChallengeProject, loadChallenges, skillProgress, weekStart, weeklyPreview, type ChallengeData } from './challenges';
+import { loadProjects } from './projects';
 import library from '../../src-tauri/src/challenge_library.json';
 
 const data=():ChallengeData=>({challenges:structuredClone(library),versions:structuredClone(library),settings:{automatic:false,tracks:['AutoCAD'],difficulties:['Beginner'],weeklyCount:1},assignments:[],progress:[],evidence:[],pathways:[],projects:[]});
@@ -44,5 +45,16 @@ describe('engineering challenges',()=>{
     const d=data();const before=skillProgress(d).find(s=>s.id==='surfaces')!;expect(before.completed).toBe(0);
     d.progress.push({challengeId:'c3d-survey',contentVersion:1,mode:'guided',status:'Completed',notes:'',deadlineDate:null,startedAtMs:1,completedAtMs:2,checks:[0,1,2]});
     expect(skillProgress(d).find(s=>s.id==='surfaces')?.completed).toBe(3);
+  });
+  it('creates one usable project from a challenge with its existing evidence in browser preview',async()=>{
+    const challenge=library[0]!;
+    await addChallengeEvidence(challenge.id,'C:\\Synthetic\\drawing.dwg');
+    const id=await createChallengeProject(challenge.id);
+    expect(await createChallengeProject(challenge.id)).toBe(id);
+    const projects=await loadProjects();
+    const value=projects.projects.find(p=>p.id===id);
+    expect(value).toMatchObject({title:challenge.title,discipline:challenge.discipline,portfolioCandidate:false});
+    expect(projects.files.filter(f=>f.projectId===id)).toEqual([expect.objectContaining({displayName:'drawing.dwg',path:'C:\\Synthetic\\drawing.dwg'})]);
+    expect((await loadChallenges()).projects.filter(link=>link.challengeId===challenge.id)).toHaveLength(1);
   });
 });
