@@ -1,7 +1,7 @@
 [package]
 name = "civildesk"
 default-run = "civildesk"
-version = "0.1.0"
+version = "0.1.1"
 description = "CivilDesk desktop workspace"
 authors = ["webswe"]
 edition = "2021"
