@@ -5,6 +5,16 @@ version = "0.1.1"
 description = "CivilDesk desktop workspace"
 authors = ["webswe"]
 edition = "2021"
+autobins = false
+
+[[bin]]
+name = "civildesk"
+path = "src/main.rs"
+
+[[bin]]
+name = "brightspace-synthetic"
+path = "src/bin/brightspace-synthetic.rs"
+required-features = ["e2e-brightspace-fixture"]
 
 [lib]
 name = "civildesk_lib"
@@ -29,3 +39,4 @@ windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Securit
 [features]
 # Routes the Notion client to a loopback mock. Compiled ONLY into the E2E binary; never enabled by default or in release builds.
 notion-mock = []
+e2e-brightspace-fixture = []

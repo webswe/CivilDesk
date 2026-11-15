@@ -65,8 +65,11 @@ export function checkNotionMockIsolation(root) {
   if (has(E2E_WORKFLOW)) {
     const text = read(E2E_WORKFLOW);
     const enabling = text.split(/\r?\n/).filter(l => /--features|(^|\s)-F\s|--all-features/.test(l));
-    const ok = enabling.length === 1 && /tauri build/.test(enabling[0]) && /tauri\.e2e\.conf\.json/.test(enabling[0]) && /--no-bundle/.test(enabling[0]) && /--\s+--features notion-mock$/.test(enabling[0].trim());
-    if (!ok) fail(`${E2E_WORKFLOW}: exactly one E2E tauri build must enable the feature, and nothing else may select features.`);
+    const notionBuilds = enabling.filter(l => /--features notion-mock\s*$/.test(l));
+    const fixtureBuilds = enabling.filter(l => /cargo build/.test(l) && /--bin brightspace-synthetic/.test(l) && /--features e2e-brightspace-fixture\s+--locked\s*$/.test(l));
+    const ok = enabling.length === 2 && notionBuilds.length === 1 && fixtureBuilds.length === 1
+      && /tauri build/.test(notionBuilds[0]) && /tauri\.e2e\.conf\.json/.test(notionBuilds[0]) && /--no-bundle/.test(notionBuilds[0]);
+    if (!ok) fail(`${E2E_WORKFLOW}: only the dedicated fixture build and E2E Tauri build may select features.`);
     for (const m of text.matchAll(/CIVILDESK_NOTION\w*\s*[:=]\s*(\S+)/g)) {
       if (!/^['"]?http:\/\/127\.0\.0\.1[:/'"]/.test(m[1])) fail(`${E2E_WORKFLOW}: mock endpoint must be http://127.0.0.1.`);
     }

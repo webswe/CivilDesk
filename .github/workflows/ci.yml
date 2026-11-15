@@ -45,3 +45,4 @@ jobs:
           $installers = @(Get-ChildItem 'src-tauri/target/release/bundle/nsis/*.exe' -File)
           if ($installers.Count -ne 1) { throw "Expected one NSIS installer; found $($installers.Count)." }
           Get-FileHash -LiteralPath $installers[0].FullName -Algorithm SHA256 | Format-List
+          node scripts/check-release-bundle.mjs $installers[0].FullName

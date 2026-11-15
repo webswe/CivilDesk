@@ -49,7 +49,7 @@ jobs:
           node scripts/check-e2e-config.mjs
           npx vitest run e2e/lib
       - name: Build dedicated synthetic Brightspace CLI
-        run: cargo build --manifest-path src-tauri/Cargo.toml --bin brightspace-synthetic --locked
+        run: cargo build --manifest-path src-tauri/Cargo.toml --bin brightspace-synthetic --features e2e-brightspace-fixture --locked
       - name: Build the E2E application (debug, no installer, isolated identity)
         run: npm run tauri build -- --debug --no-bundle --config src-tauri/tauri.e2e.conf.json -- --features notion-mock
       - name: Confirm the binary
