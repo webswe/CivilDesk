@@ -94,7 +94,7 @@ describe('notion-mock build guard', () => {
     edit(d, '.github/workflows/e2e-windows.yml', 'steps:', 'env:\n      CIVILDESK_NOTION_MOCK_URL: https://api.notion.com\n    steps:');
     expect(checkNotionMockIsolation(d).join()).toContain('http://127.0.0.1');
     d = fixture();
-    edit(d, '.github/workflows/e2e-windows.yml', 'cargo install tauri-driver --locked', 'cargo build --all-features');
+    edit(d, '.github/workflows/e2e-windows.yml', 'cargo install tauri-driver --version 2.1.0 --locked', 'cargo build --all-features');
     expect(checkNotionMockIsolation(d)).not.toEqual([]);
   });
   it('fails when the E2E workflow stops being the single enabling build', () => {

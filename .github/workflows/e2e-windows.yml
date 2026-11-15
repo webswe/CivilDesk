@@ -61,31 +61,11 @@ jobs:
           $synthetic = 'src-tauri/target/debug/brightspace-synthetic.exe'
           if (-not (Test-Path $synthetic)) { throw "Expected $synthetic" }
           Get-Item $synthetic | Format-List Name, Length
-      - name: Restore driver binaries
-        id: drivers
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/tauri-driver.exe
-            ~/.cargo/bin/msedgedriver-tool.exe
-          key: e2e-drivers-${{ runner.os }}-v1
-      - name: Install tauri-driver and msedgedriver-tool
-        if: steps.drivers.outputs.cache-hit != 'true'
-        run: |
-          cargo install tauri-driver --locked
-          cargo install --git https://github.com/chippers/msedgedriver-tool
-      - name: Show WebView2 runtime version
+      - name: Install pinned tauri-driver
+        run: cargo install tauri-driver --version 2.1.0 --locked
+      - name: Acquire and verify matching Microsoft Edge WebDriver
         shell: pwsh
-        run: |
-          $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
-          if (-not (Test-Path $key)) { throw 'WebView2 Runtime is not installed on this runner.' }
-          "WebView2 Runtime: $((Get-ItemProperty $key).pv)"
-      - name: Download matching msedgedriver
-        shell: pwsh
-        run: |
-          & "$HOME/.cargo/bin/msedgedriver-tool.exe"
-          $PWD.Path | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-          Get-ChildItem msedgedriver.exe | Format-List Name, Length
+        run: ./e2e/scripts/setup-msedgedriver.ps1
       - name: Native startup diagnostic (standalone launch, before WebDriver)
         shell: pwsh
         run: ./e2e/scripts/diagnose-startup.ps1
