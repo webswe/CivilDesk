@@ -1,0 +1,82 @@
+name: CivilDesk 0.1.1 corrected upgrade rehearsal (one branch creation)
+on:
+  push:
+    branches:
+      - verification/installer-upgrade-rehearsal-0.1.1-v2
+permissions:
+  contents: read
+concurrency:
+  group: civildesk-installer-upgrade-rehearsal-0.1.1-v2
+  cancel-in-progress: false
+jobs:
+  rehearse:
+    if: github.event.created == true && github.run_attempt == '1'
+    runs-on: windows-2022
+    timeout-minutes: 120
+    env:
+      CI: 'true'
+    steps:
+      - name: Require first creation of the exact branch
+        shell: pwsh
+        run: |
+          $event = Get-Content -LiteralPath $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json
+          if ($env:GITHUB_REPOSITORY -cne 'webswe/CivilDesk' -or $env:GITHUB_REF -cne 'refs/heads/verification/installer-upgrade-rehearsal-0.1.1-v2') { throw 'Unexpected repository or branch.' }
+          if ($env:GITHUB_RUN_ATTEMPT -cne '1' -or -not $event.created -or $event.forced -or $event.deleted -or $event.after -cne $env:GITHUB_SHA) { throw 'Only the initial, non-forced branch-creation push may rehearse.' }
+          if ($env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows') { throw 'A GitHub-hosted Windows runner is required.' }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify reviewed workflow commit and unchanged candidate parent
+        shell: pwsh
+        run: |
+          $head = (git rev-parse HEAD).Trim()
+          $parents = @((git rev-list --parents -n 1 HEAD).Trim().Split(' ', [StringSplitOptions]::RemoveEmptyEntries))
+          if ($head -cne $env:GITHUB_SHA -or $parents.Count -ne 2 -or $parents[1] -cne '5d46e131093bc59205680ad19167319f9acfb71e') { throw 'The workflow commit is not a direct child of the reviewed corrected candidate.' }
+          $expected = @('.github/workflows/installer-upgrade-rehearsal-v2.yml','docs/INSTALLER_UPGRADE_REHEARSAL_V2.md','scripts/release-rehearsal/check-baseline-bundle.mjs','scripts/release-rehearsal/check-baseline-bundle.test.mjs','scripts/release-rehearsal/fetch-public-source.ps1','scripts/release-rehearsal/run.ps1','scripts/release-rehearsal/source-guard.ps1','scripts/release-rehearsal/workflow-v2.test.mjs') | Sort-Object
+          $actual = @(git diff-tree --no-commit-id --name-only -r HEAD | Sort-Object)
+          if ($LASTEXITCODE -ne 0 -or ($actual -join "`n") -cne ($expected -join "`n")) { throw 'Unexpected workflow-branch source changes.' }
+          if (@(git status --porcelain=v1).Count -ne 0) { throw 'Workflow checkout is not clean.' }
+      - name: Fetch exact public baseline and candidate without credentials
+        shell: pwsh
+        run: ./scripts/release-rehearsal/fetch-public-source.ps1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca
+      - name: Build exact ordinary NSIS installers without publishing
+        shell: pwsh
+        run: |
+          foreach ($source in @('source-baseline','source-candidate')) {
+            Push-Location $source
+            try {
+              npm ci
+              if ($LASTEXITCODE -ne 0) { throw "Dependency installation failed for $source" }
+              npm run tauri build -- --bundles nsis
+              if ($LASTEXITCODE -ne 0) { throw "Installer build failed for $source" }
+            } finally { Pop-Location }
+          }
+      - name: Verify historical payload and corrected candidate payload
+        shell: pwsh
+        run: |
+          $baseline = './source-baseline/src-tauri/target/release/bundle/nsis/CivilDesk_0.1.0_x64-setup.exe'
+          $candidate = './source-candidate/src-tauri/target/release/bundle/nsis/CivilDesk_0.1.1_x64-setup.exe'
+          foreach ($installer in @($baseline, $candidate)) {
+            if (-not (Test-Path -LiteralPath $installer)) { throw "Missing installer: $installer" }
+            $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
+            $signature = (Get-AuthenticodeSignature -LiteralPath $installer).Status
+            "Installer $installer SHA-256 $hash; Authenticode $signature"
+          }
+          node ./scripts/release-rehearsal/check-baseline-bundle.mjs $baseline
+          if ($LASTEXITCODE -ne 0) { throw 'Historical baseline payload verification failed.' }
+          node ./source-candidate/scripts/check-release-bundle.mjs $candidate
+          if ($LASTEXITCODE -ne 0) { throw 'Corrected candidate payload verification failed.' }
+      - name: Rehearse synthetic current-user upgrade and rollback
+        shell: pwsh
+        run: |
+          ./source-candidate/scripts/release-rehearsal/run.ps1 `
+            -BaselineInstaller './source-baseline/src-tauri/target/release/bundle/nsis/CivilDesk_0.1.0_x64-setup.exe' `
+            -CandidateInstaller './source-candidate/src-tauri/target/release/bundle/nsis/CivilDesk_0.1.1_x64-setup.exe' `
+            -BaselineSha '7d293bbc61dce674d796220e3241571a9f15aa6b' `
+            -CandidateSha '5d46e131093bc59205680ad19167319f9acfb71e'

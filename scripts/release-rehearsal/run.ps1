@@ -10,7 +10,7 @@ Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -cne 'true' -or $env:CI -cne 'true' -or $env:RUNNER_OS -cne 'Windows' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted') {
   throw 'Installer execution is allowed only on a disposable GitHub-hosted Windows runner.'
 }
-if ($BaselineSha -cne '7d293bbc61dce674d796220e3241571a9f15aa6b' -or $CandidateSha -notmatch '^[a-f0-9]{40}$' -or $CandidateSha -ceq $BaselineSha) {
+if ($BaselineSha -cne '7d293bbc61dce674d796220e3241571a9f15aa6b' -or $CandidateSha -cne '5d46e131093bc59205680ad19167319f9acfb71e') {
   throw 'Source commit identity is invalid.'
 }
 $data = Join-Path $env:APPDATA 'com.webswe.civildesk'
@@ -38,19 +38,27 @@ function RegistryEntry {
   if ($entries.Count -ne 1) { throw "Expected one HKCU CivilDesk uninstall entry, found $($entries.Count)." }
   return $entries[0]
 }
-function Assert-Installed([string]$Version) {
+function Assert-Installed([string]$Version, [bool]$HistoricalFixtureExpected) {
   if (-not (Test-Path -LiteralPath $exe) -or -not (Test-Path -LiteralPath $uninstaller)) { throw 'Expected current-user installation files are missing.' }
   $entry = RegistryEntry
   if ($entry.DisplayVersion -notlike "$Version*") { throw "HKCU uninstall version mismatch: $($entry.DisplayVersion)" }
   $actualVersion = (Get-Item -LiteralPath $exe).VersionInfo.ProductVersion
   if ($actualVersion -notlike "$Version*") { throw "Installed executable version mismatch: $actualVersion" }
-  $extra = @(Get-ChildItem -LiteralPath $install -Filter '*.exe' -Recurse -File | Where-Object { $_.Name -notin @('civildesk.exe','uninstall.exe') })
+  $allowed = @('civildesk.exe','uninstall.exe')
+  if ($HistoricalFixtureExpected) { $allowed += 'brightspace-synthetic.exe' }
+  $extra = @(Get-ChildItem -LiteralPath $install -Filter '*.exe' -Recurse -File | Where-Object { $_.Name -notin $allowed })
   if ($extra.Count) { throw "Unexpected installed executable(s): $($extra.Name -join ', ')" }
-  foreach ($forbidden in @('civildesk-e2e.exe','brightspace-synthetic.exe','civildesk.sqlite3','.env')) {
-    if (Get-ChildItem -LiteralPath $install -File -Recurse | Where-Object Name -eq $forbidden) { throw "Forbidden bundled file: $forbidden" }
+  $historical = @(Get-ChildItem -LiteralPath $install -Filter 'brightspace-synthetic.exe' -Recurse -File)
+  if ($HistoricalFixtureExpected -and ($historical.Count -ne 1 -or $historical[0].FullName -cne (Join-Path $install 'brightspace-synthetic.exe'))) { throw 'The historical 0.1.0 fixture was not present exactly once at its expected path.' }
+  if (-not $HistoricalFixtureExpected -and $historical.Count) { throw 'The legacy synthetic executable survived the 0.1.1 upgrade.' }
+  foreach ($file in @(Get-ChildItem -LiteralPath $install -File -Recurse)) {
+    $name = $file.Name.ToLowerInvariant()
+    if ($name -eq 'civildesk-e2e.exe' -or $name -match '(^\.env($|\.)|credentials?\.(json|txt)$|\.sqlite3?$|(^|[-_.])e2e([-_.]|$).*(\.json|\.conf|\.config|\.db)$)') {
+      throw "Forbidden installed file: $($file.FullName)"
+    }
   }
   $acl = Get-Acl -LiteralPath $exe
-  "Installed $Version in $install; HKCU registration present; owner $($acl.Owner); ACL $($acl.Sddl)"
+  "Installed $Version in $install; historical fixture expected=$HistoricalFixtureExpected; HKCU registration present; owner $($acl.Owner); ACL $($acl.Sddl)"
 }
 function Install([string]$Installer, [string]$Version) {
   $file = (Resolve-Path -LiteralPath $Installer -ErrorAction Stop).Path
@@ -60,7 +68,7 @@ function Install([string]$Installer, [string]$Version) {
   "Installer $Version SHA-256 $hash; Authenticode $($signature.Status)"
   $process = Start-Process -FilePath $file -ArgumentList '/S' -Wait -PassThru
   if ($process.ExitCode -ne 0) { throw "NSIS installer $Version failed with exit code $($process.ExitCode)." }
-  Assert-Installed $Version
+  Assert-Installed $Version ($Version -ceq '0.1.0')
 }
 function Start-And-Check([string]$ChallengeId, [int]$Port) {
   $previous = $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
@@ -93,6 +101,7 @@ function Uninstall {
   $process = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
   if ($process.ExitCode -ne 0) { throw "Uninstaller failed with exit code $($process.ExitCode)." }
   if (Test-Path -LiteralPath $exe) { throw 'Application binary remains after uninstall.' }
+  if (Test-Path -LiteralPath (Join-Path $install 'brightspace-synthetic.exe')) { throw 'Historical synthetic executable remains after uninstall.' }
   if (-not (Test-Path -LiteralPath $db)) { throw 'Uninstall removed the synthetic user database.' }
   if (-not (Test-Path -LiteralPath $attachment)) { throw 'Uninstall removed the external synthetic file.' }
   $entries = @(Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' -ErrorAction SilentlyContinue |
@@ -128,7 +137,7 @@ try {
   Inspect $challenge $restored
   if ((Get-Content -LiteralPath $before -Raw) -cne (Get-Content -LiteralPath $restored -Raw)) { throw 'Rollback did not restore the synthetic records.' }
   Uninstall
-  'PASS: installed baseline, versioned upgrade, restart, uninstall retention, and independent rollback on synthetic data.'
+  'PASS: known-defect baseline, clean versioned upgrade, restart, uninstall retention, and independent rollback on synthetic data.'
 } finally {
   # Start-And-Check owns and closes only the process it created. The hosted runner is disposed.
   'Runner-local synthetic files remain only until this hosted runner is discarded.'
