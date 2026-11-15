@@ -16,7 +16,11 @@ use client::{
 };
 use parse::{BlocksPage, DataSourceView, DatabaseView, DiscoveryPage, EntriesPage, PageView};
 use rusqlite::{params, Connection, OptionalExtension};
-use secrets::{CredentialManagerStore, Secret, SecretStore};
+#[cfg(not(feature = "notion-mock"))]
+use secrets::CredentialManagerStore;
+#[cfg(feature = "notion-mock")]
+use secrets::E2eMemoryStore;
+use secrets::{Secret, SecretStore};
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -67,13 +71,19 @@ pub struct NotionService {
 impl NotionService {
     /// The production service: Credential Manager scoped to this build's identity, real HTTPS transport.
     pub fn production(identifier: &str) -> Self {
+        #[cfg(feature = "notion-mock")]
+        assert_eq!(
+            identifier, "com.webswe.civildesk.e2e",
+            "Notion mock requires the isolated E2E identity"
+        );
         let client = ReqwestTransport::new()
             .map(|t| Arc::new(Client::new(Arc::new(t), ClientConfig::production())));
-        Self::new(
-            identifier,
-            Box::new(CredentialManagerStore::for_identity(identifier)),
-            client,
-        )
+        #[cfg(feature = "notion-mock")]
+        let store: Box<dyn SecretStore> = Box::new(E2eMemoryStore);
+        #[cfg(not(feature = "notion-mock"))]
+        let store: Box<dyn SecretStore> =
+            Box::new(CredentialManagerStore::for_identity(identifier));
+        Self::new(identifier, store, client)
     }
 
     pub fn new(

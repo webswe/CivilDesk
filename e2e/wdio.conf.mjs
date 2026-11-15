@@ -8,15 +8,14 @@ import { e2eDataPaths, resetE2eData } from './lib/guard.mjs';
 import { seedUpgradeFixture } from './lib/fixture.mjs';
 import { expectedSchemaVersion, inspectDatabase } from './lib/db.mjs';
 import { waitForAppExit } from './lib/process.mjs';
-import { deleteE2eCredential } from './lib/credentials.mjs';
 import { MOCK_PORT } from './lib/notion-mock.mjs';
+import { e2eCredentials } from './lib/credentials.mjs';
+import { targetDir } from './lib/cargo-target.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(here, '..');
 const results = path.join(here, 'results');
 const brightspaceScenario = path.join(e2eDataPaths().data, 'brightspace-scenario.txt');
-const targetDir = process.env.CARGO_TARGET_DIR || path.join(root, 'src-tauri', 'target');
-const binary = process.env.CIVILDESK_E2E_BINARY || path.join(targetDir, 'debug', 'civildesk-e2e.exe');
+const binary = path.join(targetDir, 'debug', 'civildesk-e2e.exe');
 const driverPort = 4444;
 let driver;
 // The WebdriverIO logger opens its file before any hook runs, so the folders must exist at load time.
@@ -64,14 +63,17 @@ export const config = {
     fs.rmSync(path.join(results, 'screenshots'), { recursive: true, force: true });
     fs.mkdirSync(path.join(results, 'screenshots'), { recursive: true });
     if (!fs.existsSync(binary)) throw new Error('E2E binary not found: ' + binary + '. Build it with: npm run tauri build -- --debug --no-bundle --config src-tauri/tauri.e2e.conf.json');
+    const builtAt = fs.statSync(binary).mtimeMs;
+    for (const source of ['notion/secrets.rs', 'notion/mod.rs', 'notion/client.rs']) {
+      const file = path.join(here, '..', 'src-tauri', 'src', source);
+      if (fs.statSync(file).mtimeMs > builtAt) throw new Error('E2E binary is older than ' + source + '; rebuild the isolated E2E binary.');
+    }
     resetE2eData();
     fs.mkdirSync(path.dirname(brightspaceScenario), { recursive: true });
     fs.writeFileSync(brightspaceScenario, 'missing');
     // Prove the adapter replaces inherited selectors in its own child environment.
     process.env.D2L_CLI_PROFILE = 'invalid-inherited-profile';
     process.env.D2L_CLI_BASE_URL = 'https://inherited.example.test';
-    // Only the E2E identity's own Notion credential is ever removed, so an interrupted earlier run cannot leak into this one.
-    deleteE2eCredential();
     // The E2E binary (built with the notion-mock feature) may talk to this loopback address and nowhere else.
     // The mock itself is started by the Notion spec.
     process.env.CIVILDESK_NOTION_MOCK_URL = 'http://127.0.0.1:' + MOCK_PORT;
@@ -81,11 +83,16 @@ export const config = {
     driver.on('error', err => { console.error('tauri-driver failed to start:', err); process.exit(1); });
     await waitForPort(driverPort, 20000);
   }),
-  onComplete() { driver?.kill(); deleteE2eCredential(); },
+  onComplete() { driver?.kill(); },
 
   // Every spec file starts from an empty E2E profile (this only ever deletes the E2E identity folders).
   // A spec named *upgrade-v5* additionally gets a genuine schema-v5 database in that same disposable folder, written before the app starts.
   onWorkerStart: fatal((_cid, _caps, specs = []) => { resetE2eData(); fs.mkdirSync(path.dirname(brightspaceScenario), { recursive: true }); fs.writeFileSync(brightspaceScenario, 'missing'); if (specs.some(spec => /upgrade-v5/.test(String(spec)))) seedUpgradeFixture(); }),
+
+  // The store must listen before WebDriver launches the E2E application.
+  async beforeSession(_config, _caps, specs = []) {
+    if (specs.some(spec => /13-notion\.e2e/.test(String(spec)))) await e2eCredentials.start();
+  },
 
   // After the session closes: confirm the application really stopped, then take a consistent SQLite snapshot.
   // A timeout or a database error is recorded as a failure; nothing is ever inspected while the app may still run.

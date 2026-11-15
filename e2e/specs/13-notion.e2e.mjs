@@ -1,13 +1,13 @@
 // Phase 5A Notion foundation in the real application. The Notion API is replaced by an in-process loopback mock that
 // can only be reached because the E2E binary is built with the `notion-mock` feature. The credential is a fake token,
-// entered through the real password field, stored in the real Windows Credential Manager under the E2E identity,
-// and removed again. Nothing here contacts a live Notion workspace; this proves the Tauri + Rust boundary, not live Notion.
+// entered through the real password field and held by a process-local E2E credential store.
+// Nothing here contacts a live Notion workspace; this proves the Tauri + Rust boundary, not live Notion.
 import fs from 'node:fs';
 import path from 'node:path';
 import { $, $$, browser, expect } from '@wdio/globals';
 import { addTask, button, go, onboard, restartApp, taskRow } from '../lib/app.mjs';
 import { e2eDataPaths } from '../lib/guard.mjs';
-import { deleteE2eCredential, e2eCredentialExists } from '../lib/credentials.mjs';
+import { e2eCredentials as credentials } from '../lib/credentials.mjs';
 import { createNotionMock, FAKE_TOKEN_PREFIX, IDS } from '../lib/notion-mock.mjs';
 
 const TOKEN = FAKE_TOKEN_PREFIX + 'DoNotUseElsewhere_0123456789';
@@ -40,7 +40,7 @@ const shot = async name => { if (evidenceDir) { fs.mkdirSync(evidenceDir, { recu
 
 describe('notion foundation (real application, mocked Notion)', () => {
   before(async () => { await mock.start(); await onboard(); });
-  after(async () => { await mock.stop(); deleteE2eCredential(); });
+  after(async () => { await mock.stop(); await credentials.stop(); });
 
   it('starts disconnected with no credential and no network traffic', async () => {
     await openSettings();
@@ -48,12 +48,12 @@ describe('notion foundation (real application, mocked Notion)', () => {
     await expect($('#notion-token')).toHaveAttribute('type', 'password');
     expect(await $('//*[contains(.,"Read-only.")]').isExisting()).toBe(true);
     expect((await rawInvoke('notion_status')).value.state).toBe('not_connected');
-    expect(e2eCredentialExists()).toBe(false);
+    expect(credentials.exists()).toBe(false);
     expect(mock.state.requests).toHaveLength(0);
     await panel().scrollIntoView(); await shot('01-disconnected');
   });
 
-  it('verifies a credential with a read-only request, then stores it only in Windows Credential Manager', async () => {
+  it('verifies a credential with a read-only request, then stores it only in E2E memory', async () => {
     await $('#notion-token').setValue(TOKEN);
     await button('Connect').click();
     await waitState('Connected');
@@ -64,7 +64,7 @@ describe('notion foundation (real application, mocked Notion)', () => {
 
     expect(mock.state.requests).toHaveLength(1);
     expect(mock.state.requests[0]).toMatchObject({ method: 'GET', path: '/v1/users/me', version: '2026-03-11', authorized: true });
-    expect(e2eCredentialExists()).toBe(true);
+    expect(credentials.exists()).toBe(true);
     await panel().scrollIntoView(); await shot('02-connected');
 
     const status = await rawInvoke('notion_status');
@@ -191,7 +191,7 @@ describe('notion foundation (real application, mocked Notion)', () => {
     await expect($('//*[contains(@class,"notion-sources")]//li[contains(.,"E2E Assignments")]')).toBeDisplayed();
     expect(await panel().getText()).toContain('Remembered sources');
     expect(mock.state.requests.length).toBe(before);
-    expect(e2eCredentialExists()).toBe(true);
+    expect(credentials.exists()).toBe(true);
   });
 
   it('keeps the saved source on the workspace landing screen after a restart', async () => {
@@ -283,7 +283,7 @@ describe('notion foundation (real application, mocked Notion)', () => {
     expect(await $('//*[@role="alertdialog"]').getText()).toContain('does not revoke the connection in Notion');
     await button('Disconnect and remove token').click();
     await waitState('Not connected');
-    expect(e2eCredentialExists()).toBe(false);
+    expect(credentials.exists()).toBe(false);
     await expect($('#notion-token')).toBeDisplayed();
     const status = (await rawInvoke('notion_status')).value;
     expect(status).toMatchObject({ state: 'not_connected', selectedCount: 0 });
@@ -302,7 +302,7 @@ describe('notion foundation (real application, mocked Notion)', () => {
     await restartApp();
     await openSettings();
     await waitState('Not connected');
-    expect(e2eCredentialExists()).toBe(false);
+    expect(credentials.exists()).toBe(false);
     expect((await rawInvoke('notion_selected_sources')).value).toEqual([]);
   });
 });

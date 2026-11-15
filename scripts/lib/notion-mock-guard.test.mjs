@@ -3,11 +3,23 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { checkNotionMockIsolation } from './notion-mock-guard.mjs';
+import { checkNotionMockIsolation, hasE2eCredentialSourceControls } from './notion-mock-guard.mjs';
 
 // Every negative case runs against a disposable copy; the real workflows are never modified.
 const real = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const dirs = [];
+
+describe('E2E credential source gate', () => {
+  const source = fs.readFileSync(path.join(real, 'src-tauri/src/notion/secrets.rs'), 'utf8').replace(/\r\n/g, '\n');
+  it('accepts LF and CRLF but rejects removal of any required control', () => {
+    for (const text of [source, source.replace(/\n/g, '\r\n')]) {
+      expect(hasE2eCredentialSourceControls(text)).toBe(true);
+      for (const required of ['#[cfg(feature = "notion-mock")]', 'http://127.0.0.1:4456/credential', '#[ignore = "manual OS credential-store test; excluded from offline verification"]']) {
+        expect(hasE2eCredentialSourceControls(text.replace(required, ''))).toBe(false);
+      }
+    }
+  });
+});
 function fixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cd-guard-'));
   dirs.push(dir);

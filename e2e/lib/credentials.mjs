@@ -1,19 +1,38 @@
-// Windows Credential Manager checks for the E2E identity ONLY. The target names are fixed constants for
-// com.webswe.civildesk.e2e; this module cannot address the production, Acceptance or development credentials.
-import { spawnSync } from 'node:child_process';
+// Process-local credential store for the isolated native E2E application.
+// Restarting the application preserves this runner's memory; ending the spec discards it.
+import http from 'node:http';
 
-// The application stores the secret as service "<identifier>.notion", account "notion-connection"; the Windows
-// backend names the entry "<account>.<service>".
-export const E2E_CREDENTIAL_TARGET = 'notion-connection.com.webswe.civildesk.e2e.notion';
-const cmdkey = args => spawnSync('cmdkey', args, { encoding: 'utf8', windowsHide: true });
+const PORT = 4456;
+export function createE2eCredentialStore() {
+  let credential = null;
+  let server;
+  return {
+    exists: () => credential !== null,
+    start: () => new Promise((resolve, reject) => {
+      server = http.createServer((req, res) => {
+        if (req.url !== '/credential' || !['GET', 'PUT', 'DELETE'].includes(req.method)) { res.writeHead(405); res.end(); return; }
+        if (req.method === 'GET') {
+          res.writeHead(credential === null ? 204 : 200, { 'content-type': 'text/plain' });
+          res.end(credential ?? '');
+        } else if (req.method === 'DELETE') {
+          credential = null; res.writeHead(204); res.end();
+        } else {
+          let raw = '';
+          req.on('data', chunk => { raw += chunk; if (raw.length > 4096) req.destroy(); });
+          req.on('end', () => { credential = raw; res.writeHead(204); res.end(); });
+        }
+      });
+      server.once('error', reject);
+      server.listen(PORT, '127.0.0.1', resolve);
+    }),
+    stop: () => new Promise(resolve => {
+      credential = null;
+      if (!server) return resolve();
+      server.closeAllConnections?.();
+      server.close(resolve);
+      server = null;
+    }),
+  };
+}
 
-export function e2eCredentialExists() {
-  if (process.platform !== 'win32') return false;
-  const out = cmdkey([`/list:${E2E_CREDENTIAL_TARGET}`]);
-  // cmdkey /list:<missing> still exits 0 and echoes the name, so look for an actual entry record.
-  return out.status === 0 && /^\s*Target:/im.test(out.stdout);
-}
-export function deleteE2eCredential() {
-  if (process.platform !== 'win32') return;
-  cmdkey([`/delete:${E2E_CREDENTIAL_TARGET}`]); // exit status is non-zero when nothing exists; that is fine
-}
+export const e2eCredentials = createE2eCredentialStore();

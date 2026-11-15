@@ -1,4 +1,4 @@
-//! Credential storage. Tokens live only in the Windows Credential Manager, scoped by application identity.
+//! Credential storage. Normal builds use Windows Credential Manager; the isolated E2E build uses memory.
 //! They are never written to SQLite, configuration, logs, exports or frontend state.
 
 use std::fmt;
@@ -45,19 +45,23 @@ pub trait SecretStore: Send + Sync {
     fn delete(&self) -> Result<(), SecretError>;
 }
 
+#[cfg(any(not(feature = "notion-mock"), test))]
 const ACCOUNT: &str = "notion-connection";
 
 /// The credential service name for an application identity, e.g. `com.webswe.civildesk.dev.notion`.
 /// Each identity (production, acceptance, e2e, dev) therefore uses a different Credential Manager entry.
+#[cfg(any(not(feature = "notion-mock"), test))]
 pub fn service_name(identifier: &str) -> String {
     format!("{identifier}.notion")
 }
 
 /// Windows Credential Manager (via the `keyring` crate's native backend).
+#[cfg(any(not(feature = "notion-mock"), test))]
 pub struct CredentialManagerStore {
     service: String,
 }
 
+#[cfg(any(not(feature = "notion-mock"), test))]
 impl CredentialManagerStore {
     pub fn for_identity(identifier: &str) -> Self {
         Self {
@@ -71,6 +75,7 @@ impl CredentialManagerStore {
     }
 }
 
+#[cfg(any(not(feature = "notion-mock"), test))]
 impl SecretStore for CredentialManagerStore {
     fn get(&self) -> Result<Option<Secret>, SecretError> {
         match self.entry()?.get_password() {
@@ -97,6 +102,71 @@ impl SecretStore for CredentialManagerStore {
                     .into(),
             )),
         }
+    }
+}
+
+/// The native E2E process keeps this store in the spec runner's memory across app restarts.
+/// Compiled only with the test-only Notion feature; no environment selector or disk fallback exists.
+#[cfg(feature = "notion-mock")]
+pub struct E2eMemoryStore;
+
+#[cfg(feature = "notion-mock")]
+impl E2eMemoryStore {
+    const URL: &'static str = "http://127.0.0.1:4456/credential";
+
+    fn request(
+        &self,
+        method: reqwest::Method,
+        value: Option<&str>,
+    ) -> Result<Option<Secret>, SecretError> {
+        use std::io::Read;
+        let client = reqwest::blocking::Client::builder()
+            .no_proxy()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .map_err(|_| Self::unavailable())?;
+        let mut request = client.request(method, Self::URL);
+        if let Some(value) = value {
+            request = request.body(value.to_owned());
+        }
+        let response = request.send().map_err(|_| Self::unavailable())?;
+        match response.status().as_u16() {
+            204 => Ok(None),
+            200 => {
+                let mut bytes = Vec::new();
+                response
+                    .take(4097)
+                    .read_to_end(&mut bytes)
+                    .map_err(|_| Self::unavailable())?;
+                if bytes.len() > 4096 {
+                    return Err(Self::unavailable());
+                }
+                let value = String::from_utf8(bytes).map_err(|_| Self::unavailable())?;
+                Ok(Some(Secret::new(value)))
+            }
+            _ => Err(Self::unavailable()),
+        }
+    }
+
+    fn unavailable() -> SecretError {
+        SecretError::Unavailable("The E2E credential store is unavailable.".into())
+    }
+}
+
+#[cfg(feature = "notion-mock")]
+impl SecretStore for E2eMemoryStore {
+    fn get(&self) -> Result<Option<Secret>, SecretError> {
+        self.request(reqwest::Method::GET, None)
+    }
+    fn set(&self, secret: &Secret) -> Result<(), SecretError> {
+        if secret.expose().len() > 4096 {
+            return Err(Self::unavailable());
+        }
+        self.request(reqwest::Method::PUT, Some(secret.expose()))
+            .map(|_| ())
+    }
+    fn delete(&self) -> Result<(), SecretError> {
+        self.request(reqwest::Method::DELETE, None).map(|_| ())
     }
 }
 
@@ -240,6 +310,7 @@ mod tests {
 
     /// Real Windows Credential Manager round trip under a unique throwaway service name; removed afterwards.
     #[cfg(windows)]
+    #[ignore = "manual OS credential-store test; excluded from offline verification"]
     #[test]
     fn windows_credential_manager_round_trip_and_isolation() {
         let stamp = std::time::SystemTime::now()

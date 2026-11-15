@@ -5,10 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { $, $$, browser, expect } from '@wdio/globals';
 import { dialogButton, field, go, localDate, onboard, restartApp, setField } from '../lib/app.mjs';
 import { e2eDataPaths } from '../lib/guard.mjs';
+import { targetDir } from '../lib/cargo-target.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const target = process.env.CARGO_TARGET_DIR || path.join(root, 'src-tauri', 'target');
-const executable = path.join(target, 'debug', 'brightspace-synthetic.exe');
+const executable = path.join(targetDir, 'debug', 'brightspace-synthetic.exe');
 const scenarioFile = path.join(e2eDataPaths().data, 'brightspace-scenario.txt');
 const origin = 'https://synthetic.example.test';
 const badge = () => $('.brightspace-badge');
@@ -32,7 +32,7 @@ describe('Brightspace connection foundation (synthetic executable only)', () => 
     await expect(badge()).toHaveText('Not configured');
     const wrongPortal = await invoke('brightspace_save_configuration', { portalOrigin: 'https://learn.example.edu', executablePath: executable });
     expect(wrongPortal.ok).toBe(false);
-    const wrongExe = await invoke('brightspace_save_configuration', { portalOrigin: origin, executablePath: path.join(target, 'debug', 'civildesk-e2e.exe') });
+    const wrongExe = await invoke('brightspace_save_configuration', { portalOrigin: origin, executablePath: path.join(targetDir, 'debug', 'civildesk-e2e.exe') });
     expect(wrongExe.ok).toBe(false);
     expect((await inspect()).state).toBe('not_configured');
   });
