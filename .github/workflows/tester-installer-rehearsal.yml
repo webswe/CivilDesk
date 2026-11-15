@@ -1,0 +1,79 @@
+name: Tester installer rehearsal (manual, disposable)
+
+# This workflow is intentionally inert until a separately reviewed copy is placed on main
+# with APPROVED_CANDIDATE_SHA set to the exact reviewed release-preparation commit.
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact reviewed 0.1.1 source commit (40 lowercase hex digits)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  upgrade:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      CI: 'true'
+      BASELINE_SHA: 7d293bbc61dce674d796220e3241571a9f15aa6b
+      APPROVED_CANDIDATE_SHA: UNSET
+      INPUT_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+    steps:
+      - name: Require trusted main workflow and separately approved exact source
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REPOSITORY -cne 'webswe/CivilDesk' -or $env:GITHUB_REF -cne 'refs/heads/main') { throw 'Dispatch must use the reviewed main workflow.' }
+          if ($env:RUNNER_ENVIRONMENT -cne 'github-hosted') { throw 'Self-hosted runners are forbidden.' }
+          if ($env:APPROVED_CANDIDATE_SHA -notmatch '^[a-f0-9]{40}$') { throw 'The owner-approved candidate SHA has not been set on main.' }
+          if ($env:INPUT_CANDIDATE_SHA -cne $env:APPROVED_CANDIDATE_SHA) { throw 'Candidate SHA does not match the owner-approved source.' }
+      - uses: actions/checkout@v4
+        with:
+          ref: 7d293bbc61dce674d796220e3241571a9f15aa6b
+          path: baseline
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          path: candidate
+          persist-credentials: false
+      - name: Verify both immutable checkouts and ordinary installer configuration
+        shell: pwsh
+        run: |
+          if ((git -C baseline rev-parse HEAD).Trim() -cne $env:BASELINE_SHA) { throw 'Baseline checkout changed.' }
+          if ((git -C candidate rev-parse HEAD).Trim() -cne $env:APPROVED_CANDIDATE_SHA) { throw 'Candidate checkout changed.' }
+          foreach ($entry in @(@{Path='baseline';Version='0.1.0'},@{Path='candidate';Version='0.1.1'})) {
+            $config = Get-Content -LiteralPath (Join-Path $entry.Path 'src-tauri/tauri.conf.json') -Raw | ConvertFrom-Json
+            if ($config.identifier -cne 'com.webswe.civildesk' -or $config.version -cne $entry.Version -or $config.bundle.windows.nsis.installMode -cne 'currentUser') { throw "Unexpected installer identity or mode in $($entry.Path)." }
+            if ($config.bundle.windows.webviewInstallMode.type -cne 'offlineInstaller') { throw 'Offline WebView2 packaging changed.' }
+          }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build pinned ordinary NSIS installers without publishing
+        shell: pwsh
+        run: |
+          foreach ($source in @('baseline','candidate')) {
+            Push-Location $source
+            try {
+              npm ci
+              if ($LASTEXITCODE -ne 0) { throw "npm ci failed for $source" }
+              npm run tauri build -- --bundles nsis
+              if ($LASTEXITCODE -ne 0) { throw "NSIS build failed for $source" }
+            } finally { Pop-Location }
+          }
+      - name: Rehearse versioned current-user install, synthetic upgrade and rollback
+        shell: pwsh
+        run: |
+          ./candidate/scripts/release-rehearsal/run.ps1 `
+            -BaselineInstaller './baseline/src-tauri/target/release/bundle/nsis/CivilDesk_0.1.0_x64-setup.exe' `
+            -CandidateInstaller './candidate/src-tauri/target/release/bundle/nsis/CivilDesk_0.1.1_x64-setup.exe' `
+            -BaselineSha $env:BASELINE_SHA -CandidateSha $env:APPROVED_CANDIDATE_SHA
+      - name: Confirm diagnostics remain on the disposable runner
+        if: always()
+        shell: pwsh
+        run: '"No installer or diagnostic artifact was uploaded. Runner-local synthetic data is discarded with the hosted runner." | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append'
