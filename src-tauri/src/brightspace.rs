@@ -195,6 +195,14 @@ pub struct Adapter {
 }
 
 impl Adapter {
+    // Only the dedicated synthetic E2E build may start a CLI child. Production,
+    // development, and Acceptance have no approved package or launch path.
+    fn cli_execution_allowed(&self) -> bool {
+        cfg!(feature = "notion-mock")
+            && self.identity == "com.webswe.civildesk.e2e"
+            && self.profile == "civildesk-e2e-synthetic"
+    }
+
     pub fn new(identity: &str) -> Result<Self, String> {
         let profile = match identity {
             "com.webswe.civildesk" => "civildesk-prod",
@@ -587,6 +595,16 @@ impl Adapter {
     }
 
     pub fn inspect(&self, db: &Database) -> Inspection {
+        if !self.cli_execution_allowed() {
+            return Inspection::new(
+                "verification_unavailable",
+                self.profile,
+                self.load(db).ok().flatten().as_ref(),
+                false,
+                false,
+                "D2L-CLI execution is disabled in this build. Saved settings remain stored but cannot be inspected.",
+            );
+        }
         let _guard = match self.in_flight.try_lock() {
             Ok(guard) => guard,
             Err(_) => {
@@ -759,6 +777,9 @@ impl Adapter {
         origin: &str,
         args: &[&str],
     ) -> Result<Output, &'static str> {
+        if !self.cli_execution_allowed() {
+            return Err("D2L-CLI execution is disabled in this build.");
+        }
         if self.cancelled.load(Ordering::SeqCst) {
             return Err("cancelled");
         }
@@ -1864,10 +1885,20 @@ mod tests {
                 .unwrap();
         assert!(raw.contains("executableSha256"));
         assert!(!raw.contains("cookie") && !raw.contains("token") && !raw.contains("password"));
+        assert!(!adapter.cli_execution_allowed());
+        assert_eq!(adapter.inspect(&db).state, "verification_unavailable");
+        assert!(!adapter.inspect(&db).cli_available);
+        assert!(!adapter.inspect(&db).cli_compatible);
+        assert_eq!(
+            adapter
+                .run(&exe, "", "https://learn.example.edu", &[])
+                .err(),
+            Some("D2L-CLI execution is disabled in this build.")
+        );
         std::fs::remove_file(&exe).unwrap();
-        assert_eq!(adapter.inspect(&db).state, "cli_unavailable");
+        assert_eq!(adapter.inspect(&db).state, "verification_unavailable");
         std::fs::write(&exe, b"CHANGED_SYNTHETIC_NOT_EXECUTED").unwrap();
-        assert_eq!(adapter.inspect(&db).state, "cli_untrusted");
+        assert_eq!(adapter.inspect(&db).state, "verification_unavailable");
         std::fs::remove_file(exe).unwrap();
         std::fs::remove_dir(dir).unwrap();
     }

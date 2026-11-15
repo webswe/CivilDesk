@@ -27,6 +27,7 @@ it('loads nonsecret settings without launching the CLI', async () => {
   expect(screen.getByDisplayValue(base.executablePath)).toBeInTheDocument();
   expect(screen.getByText('Not checked')).toBeInTheDocument();
   expect(inspect).not.toHaveBeenCalled();
+  expect(screen.getByText(/D2L-CLI execution is disabled/)).toBeInTheDocument();
 });
 
 it('saves only portal and executable fields', async () => {
@@ -46,6 +47,7 @@ it.each([
   ['credential_error', 'Credential or storage error'],
   ['cli_incompatible', 'CLI incompatible'],
   ['cli_unavailable', 'CLI unavailable'],
+  ['verification_unavailable', 'Live verification unavailable'],
 ] as const)('presents %s without claiming a live connection', async (state, label) => {
   inspect.mockResolvedValueOnce({ ...base, state, message: 'Synthetic status.' });
   render(<BrightspaceSettings />);

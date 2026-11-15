@@ -16,14 +16,14 @@ export function BrightspaceSettings() {
   const label = inspection ? labels[inspection.state] ?? 'CLI error' : configured === false ? 'Not configured' : 'Not checked';
   return <section className="setting-group brightspace-panel" aria-labelledby="brightspace-heading">
     <div className="brightspace-head"><h2 id="brightspace-heading">Brightspace</h2><span className="brightspace-badge" role="status">{label}</span></div>
-    <p>Configure the portal and D2L-CLI executable you trust. CivilDesk checks local compatibility and credential presence only. It does not sign in, retrieve courses, or sync School data.</p>
+    <p>Saved portal and executable settings are retained locally. D2L-CLI execution is disabled in this build; inspecting status cannot launch the configured executable or verify a connection.</p>
     <form onSubmit={e => void save(e)} autoComplete="off">
       <label htmlFor="brightspace-portal">Brightspace portal origin</label>
       <input id="brightspace-portal" type="url" spellCheck={false} value={portal} onChange={e => setPortal(e.target.value)} placeholder="https://learn.example.edu" />
       <small>Use the plain HTTPS origin, without a path, query, or sign-in details.</small>
       <label htmlFor="brightspace-executable">Trusted D2L-CLI executable</label>
       <input id="brightspace-executable" type="text" spellCheck={false} value={executable} onChange={e => setExecutable(e.target.value)} placeholder="C:\\Tools\\d2l.exe" />
-      <small>Choose an installed executable you trust. CivilDesk remembers its path and file fingerprint.</small>
+      <small>CivilDesk remembers the selected path and file fingerprint, but does not execute it in this build.</small>
       <div className="brightspace-actions"><button className="primary-button" type="submit" disabled={busy || !portal || !executable}>Save settings</button><button className="soft-button" type="button" onClick={() => void inspect()} disabled={busy}>Inspect status</button>{inspecting && <button className="soft-button" type="button" onClick={() => void brightspaceCancel()}>Cancel check</button>}</div>
     </form>
     {problem && <p role="alert" className="brightspace-problem">{problem}</p>}
@@ -33,6 +33,6 @@ export function BrightspaceSettings() {
       <div><dt>Profile</dt><dd>{inspection.profileId}</dd></div>
       <div><dt>Portal</dt><dd>{inspection.portalOrigin ?? 'Not set'}</dd></div>
     </dl></div>}
-    <p className="brightspace-caution">A stored credential is unverified until Brightspace accepts a supported live check. Live verification is unavailable in the current CLI contract; no connection claim is made here.</p>
+    <p className="brightspace-caution">A stored credential remains unverified. Live verification is unavailable, as is academic-data retrieval.</p>
   </section>;
 }
