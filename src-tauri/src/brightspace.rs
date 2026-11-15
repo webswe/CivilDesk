@@ -1885,6 +1885,10 @@ mod tests {
                 .unwrap();
         assert!(raw.contains("executableSha256"));
         assert!(!raw.contains("cookie") && !raw.contains("token") && !raw.contains("password"));
+        // An inherited selector must not turn a saved standalone path into an
+        // executable source. The production gate is checked before Command::new.
+        let previous = std::env::var_os("D2L_CLI_EXECUTABLE");
+        std::env::set_var("D2L_CLI_EXECUTABLE", &exe);
         assert!(!adapter.cli_execution_allowed());
         assert_eq!(adapter.inspect(&db).state, "verification_unavailable");
         assert!(!adapter.inspect(&db).cli_available);
@@ -1895,6 +1899,10 @@ mod tests {
                 .err(),
             Some("D2L-CLI execution is disabled in this build.")
         );
+        match previous {
+            Some(value) => std::env::set_var("D2L_CLI_EXECUTABLE", value),
+            None => std::env::remove_var("D2L_CLI_EXECUTABLE"),
+        }
         std::fs::remove_file(&exe).unwrap();
         assert_eq!(adapter.inspect(&db).state, "verification_unavailable");
         std::fs::write(&exe, b"CHANGED_SYNTHETIC_NOT_EXECUTED").unwrap();
